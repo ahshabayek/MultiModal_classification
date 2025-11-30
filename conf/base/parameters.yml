@@ -1,9 +1,35 @@
-# Model parameters
-n_estimators: 100
-max_depth: 10
-random_state: 42
-
-# MLflow settings
+# MLflow Configuration
 mlflow:
-  tracking_uri: "file:./mlruns"  # or http://your-mlflow-server:5000
-  experiment_name: "kedro-experiment"
+  tracking_uri: "file:./mlruns"
+  experiment_name: "hateful-memes-comparison"
+
+# Model Selection
+models:
+  - vilbert
+  - visualbert
+  - clip
+
+# Training Parameters (default - override per model)
+training:
+  batch_size: 32
+  learning_rate: 5e-5
+  num_epochs: 10
+  warmup_steps: 500
+  weight_decay: 0.01
+  gradient_accumulation_steps: 1
+
+# Model-specific parameters
+vilbert:
+  model_name: "dandelin/vilt-b32-finetuned-vqa"
+  max_seq_length: 128
+  use_faster_rcnn: true
+
+visualbert:
+  model_name: "uclanlp/visualbert-vqa"
+  max_seq_length: 128
+  visual_embedding_dim: 2048
+
+clip:
+  model_name: "openai/clip-vit-base-patch32"
+  freeze_vision_model: false
+  freeze_text_model: false

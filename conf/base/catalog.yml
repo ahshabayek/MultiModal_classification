@@ -1,106 +1,198 @@
-# Here you can define all your data sets by using simple YAML syntax.
-#
-# Documentation for this file format can be found in "The Data Catalog"
-# Link: https://docs.kedro.org/en/stable/data/data_catalog.html
-#
-# We support interacting with a variety of data stores including local file systems, cloud, network and HDFS
-#
-# An example data set definition can look as follows:
-#
-#bikes:
-#  type: pandas.CSVDataset
-#  filepath: "data/01_raw/bikes.csv"
-#
-#weather:
-#  type: spark.SparkDataset
-#  filepath: s3a://your_bucket/data/01_raw/weather*
-#  file_format: csv
-#  credentials: dev_s3
-#  load_args:
-#    header: True
-#    inferSchema: True
-#  save_args:
-#    sep: '|'
-#    header: True
-#
-#scooters:
-#  type: pandas.SQLTableDataset
-#  credentials: scooters_credentials
-#  table_name: scooters
-#  load_args:
-#    index_col: ['name']
-#    columns: ['name', 'gear']
-#  save_args:
-#    if_exists: 'replace'
-#    # if_exists: 'fail'
-#    # if_exists: 'append'
-#
-# The Data Catalog supports being able to reference the same file using two different Dataset implementations
-# (transcoding), templating and a way to reuse arguments that are frequently repeated. See more here:
-# https://docs.kedro.org/en/stable/data/data_catalog.html
+# =============================================================================
+# Data Catalog - Hateful Memes Multimodal Classification
+# =============================================================================
+# Location: conf/base/catalog.yml
+# =============================================================================
 
-companies:
-  type: pandas.CSVDataset
-  filepath: data/01_raw/companies.csv
+# -----------------------------------------------------------------------------
+# RAW DATA - Hateful Memes Dataset (from Hugging Face)
+# -----------------------------------------------------------------------------
 
-reviews:
-  type: pandas.CSVDataset
-  filepath: data/01_raw/reviews.csv
-
-shuttles:
-  type: pandas.ExcelDataset
-  filepath: data/01_raw/shuttles.xlsx
+hateful_memes_train:
+  type: pandas.JSONDataset
+  filepath: data/01_raw/hateful_memes/train.jsonl
   load_args:
-    engine: openpyxl
+    lines: true
 
-preprocessed_companies:
+hateful_memes_dev_seen:
+  type: pandas.JSONDataset
+  filepath: data/01_raw/hateful_memes/dev_seen.jsonl
+  load_args:
+    lines: true
+
+hateful_memes_dev_unseen:
+  type: pandas.JSONDataset
+  filepath: data/01_raw/hateful_memes/dev_unseen.jsonl
+  load_args:
+    lines: true
+
+hateful_memes_test_seen:
+  type: pandas.JSONDataset
+  filepath: data/01_raw/hateful_memes/test_seen.jsonl
+  load_args:
+    lines: true
+
+hateful_memes_test_unseen:
+  type: pandas.JSONDataset
+  filepath: data/01_raw/hateful_memes/test_unseen.jsonl
+  load_args:
+    lines: true
+
+hateful_memes_stats:
+  type: json.JSONDataset
+  filepath: data/01_raw/hateful_memes/dataset_stats.json
+
+# -----------------------------------------------------------------------------
+# PROCESSED DATA - Output from data_processing pipeline
+# -----------------------------------------------------------------------------
+
+processed_train:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/preprocessed_companies.parquet
+  filepath: data/02_intermediate/train_processed.parquet
 
-preprocessed_shuttles:
+processed_val:
   type: pandas.ParquetDataset
-  filepath: data/02_intermediate/preprocessed_shuttles.parquet
+  filepath: data/02_intermediate/val_processed.parquet
 
-model_input_table:
+processed_test_seen:
   type: pandas.ParquetDataset
-  filepath: data/03_primary/model_input_table.parquet
+  filepath: data/02_intermediate/test_seen_processed.parquet
 
-regressor:
+processed_test_unseen:
+  type: pandas.ParquetDataset
+  filepath: data/02_intermediate/test_unseen_processed.parquet
+
+data_splits_info:
+  type: json.JSONDataset
+  filepath: data/02_intermediate/data_splits_info.json
+
+# -----------------------------------------------------------------------------
+# FEATURE DATA - Embeddings from models
+# -----------------------------------------------------------------------------
+
+# CLIP
+clip_train_features:
   type: pickle.PickleDataset
-  filepath: data/06_models/regressor.pickle
-  versioned: true
+  filepath: data/03_feature/clip/train_features.pkl
+  backend: pickle
 
-shuttle_passenger_capacity_plot_exp:
-  type: plotly.PlotlyDataset
-  filepath: data/08_reporting/shuttle_passenger_capacity_plot_exp.json
-  versioned: true
-  plotly_args:
-    type: bar
-    fig:
-      x: shuttle_type
-      y: passenger_capacity
-      orientation: h
-    layout:
-      xaxis_title: Shuttles
-      yaxis_title: Average passenger capacity
-      title: Shuttle Passenger capacity
+clip_val_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/clip/val_features.pkl
+  backend: pickle
 
-shuttle_passenger_capacity_plot_go:
-  type: plotly.JSONDataset
-  filepath: data/08_reporting/shuttle_passenger_capacity_plot_go.json
-  versioned: true
+clip_test_seen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/clip/test_seen_features.pkl
+  backend: pickle
 
-dummy_confusion_matrix:
+clip_test_unseen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/clip/test_unseen_features.pkl
+  backend: pickle
+
+# ViLBERT
+vilbert_train_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/vilbert/train_features.pkl
+  backend: pickle
+
+vilbert_val_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/vilbert/val_features.pkl
+  backend: pickle
+
+vilbert_test_seen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/vilbert/test_seen_features.pkl
+  backend: pickle
+
+vilbert_test_unseen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/vilbert/test_unseen_features.pkl
+  backend: pickle
+
+# VisualBERT
+visualbert_train_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/visualbert/train_features.pkl
+  backend: pickle
+
+visualbert_val_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/visualbert/val_features.pkl
+  backend: pickle
+
+visualbert_test_seen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/visualbert/test_seen_features.pkl
+  backend: pickle
+
+visualbert_test_unseen_features:
+  type: pickle.PickleDataset
+  filepath: data/03_feature/visualbert/test_unseen_features.pkl
+  backend: pickle
+
+# -----------------------------------------------------------------------------
+# MODELS - Saved checkpoints
+# -----------------------------------------------------------------------------
+
+clip_model:
+  type: pickle.PickleDataset
+  filepath: data/04_models/clip_classifier.pt
+  backend: pickle
+
+vilbert_model:
+  type: pickle.PickleDataset
+  filepath: data/04_models/vilbert_classifier.pt
+  backend: pickle
+
+visualbert_model:
+  type: pickle.PickleDataset
+  filepath: data/04_models/visualbert_classifier.pt
+  backend: pickle
+
+best_model:
+  type: pickle.PickleDataset
+  filepath: data/04_models/best_model.pt
+  backend: pickle
+
+# -----------------------------------------------------------------------------
+# MODEL OUTPUT - Predictions
+# -----------------------------------------------------------------------------
+
+clip_predictions:
+  type: pandas.ParquetDataset
+  filepath: data/05_model_output/clip_predictions.parquet
+
+vilbert_predictions:
+  type: pandas.ParquetDataset
+  filepath: data/05_model_output/vilbert_predictions.parquet
+
+visualbert_predictions:
+  type: pandas.ParquetDataset
+  filepath: data/05_model_output/visualbert_predictions.parquet
+
+# -----------------------------------------------------------------------------
+# REPORTING - Metrics and figures
+# -----------------------------------------------------------------------------
+
+model_metrics:
+  type: json.JSONDataset
+  filepath: data/06_reporting/model_metrics.json
+
+training_history:
+  type: json.JSONDataset
+  filepath: data/06_reporting/training_history.json
+
+confusion_matrix_fig:
   type: matplotlib.MatplotlibWriter
-  filepath: data/08_reporting/dummy_confusion_matrix.png
-  versioned: true
+  filepath: data/06_reporting/figures/confusion_matrix.png
 
-model:
-  type: pickle.PickleDataSet
-  filepath: data/06_models/model.pkl
-  versioned: true
+roc_curves_fig:
+  type: matplotlib.MatplotlibWriter
+  filepath: data/06_reporting/figures/roc_curves.png
 
-mlflow_model:
-  type: kedro_mlflow.io.models.MlflowModelLoggerDataSet
-  flavor: mlflow.sklearn
-  artifact_path: model
+model_comparison_fig:
+  type: matplotlib.MatplotlibWriter
+  filepath: data/06_reporting/figures/model_comparison.png
