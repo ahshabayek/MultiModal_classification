@@ -1,0 +1,26 @@
+{
+  "source": "neuralcatcher/hateful_memes",
+  "splits": {
+    "train": {
+      "count": 8500,
+      "hateful": 3019,
+      "not_hateful": 5481,
+      "hateful_ratio": 0.3551764705882353
+    },
+    "validation": {
+      "count": 1040,
+      "hateful": 447,
+      "not_hateful": 593,
+      "hateful_ratio": 0.42980769230769234
+    },
+    "test": {
+      "count": 3000,
+      "hateful": 1240,
+      "not_hateful": 1760,
+      "hateful_ratio": 0.41333333333333333
+    }
+  },
+  "total_samples": 12540,
+  "total_hateful": 4706,
+  "image_count": 0
+}

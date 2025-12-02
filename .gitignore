@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Kedro
+.viz/
+
+# Data - Do not track large data files
+data/01_raw/hateful_memes/img/
+data/01_raw/hateful_memes/img.tar.gz
+data/01_raw/hateful_memes/*.part
+data/02_intermediate/
+data/03_primary/
+data/04_feature/
+data/05_model_output/*.pt
+data/06_models/
+data/07_model_output/
+data/08_reporting/
+
+# Keep directory structure
+!data/**/.gitkeep
+
+# MLflow
+mlruns/
+
+# Logs
+*.log
+info.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials and local config
+conf/local/credentials.yml
+conf/local/mlflow.yml

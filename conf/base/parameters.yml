@@ -1,35 +1,39 @@
-# MLflow Configuration
-mlflow:
-  tracking_uri: "file:./mlruns"
-  experiment_name: "hateful-memes-comparison"
+# Data Processing Parameters
+data_processing:
+  # Directory where images will be stored
+  data_dir: "data/01_raw/hateful_memes"
+  # Google Drive URL for image archive
+  gdrive_img_url: "https://drive.google.com/uc?id=1VZ2WQrh4MRStFfWRSx0ezYJ_DlcaCGwI"
+  # Use HuggingFace validation split as validation set
+  use_dev_as_val: true
+  # If not using dev as val, split this ratio from train
+  val_split_ratio: 0.1
+  # Random seed for reproducibility
+  random_seed: 42
+  # Text preprocessing
+  max_text_length: 512
+  lowercase: false
 
-# Model Selection
-models:
-  - vilbert
-  - visualbert
-  - clip
-
-# Training Parameters (default - override per model)
+# Training Parameters
 training:
-  batch_size: 32
-  learning_rate: 5e-5
-  num_epochs: 10
-  warmup_steps: 500
+  batch_size: 16
+  num_epochs: 100
+  learning_rate: 2.0e-5
   weight_decay: 0.01
-  gradient_accumulation_steps: 1
+  early_stopping_patience: 10
 
-# Model-specific parameters
+# ViLBERT Model Parameters
 vilbert:
-  model_name: "dandelin/vilt-b32-finetuned-vqa"
+  # HuggingFace model for pretrained weights
+  huggingface_model: "visualjoyce/transformers4vl-vilbert"
+  num_labels: 2
+  freeze_bert_layers: 6
   max_seq_length: 128
-  use_faster_rcnn: true
-
-visualbert:
-  model_name: "uclanlp/visualbert-vqa"
-  max_seq_length: 128
-  visual_embedding_dim: 2048
-
-clip:
-  model_name: "openai/clip-vit-base-patch32"
-  freeze_vision_model: false
-  freeze_text_model: false
+  # Image processing
+  image_size: 224
+  max_regions: 36
+  visual_feature_dim: 2048
+  # Directory to save trained models
+  output_dir: "data/05_model_output"
+  # Path to locally trained checkpoint (used by vilbert_validate and vilbert_inference_local)
+  checkpoint_path: "data/05_model_output/vilbert_best.pt"
