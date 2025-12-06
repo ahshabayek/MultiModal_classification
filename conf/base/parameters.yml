@@ -14,26 +14,275 @@ data_processing:
   max_text_length: 512
   lowercase: false
 
-# Training Parameters
-training:
-  batch_size: 16
-  num_epochs: 100
-  learning_rate: 2.0e-5
-  weight_decay: 0.01
-  early_stopping_patience: 10
+  # Caption Enrichment (CES) - improves AUROC by +2-6%
+  # Reference: "Caption Enriched Samples for Improving Hateful Memes Detection" (EMNLP 2021)
+  use_captions: false # Set to true to enable (requires BLIP model download)
+  caption_cache_path: "data/02_intermediate/captions.csv"
 
-# ViLBERT Model Parameters
+# Training Parameters (Facebook MMF baseline + improvements)
+# Reference: https://github.com/facebookresearch/mmf/issues/290
+training:
+  # Batch size: 32 is MMF default, adjust based on GPU memory
+  batch_size: 32
+  # Number of epochs (with early stopping)
+  num_epochs: 20
+  # Learning rate: 5e-5 is the MMF/BERT default
+  learning_rate: 5.0e-5
+  # Weight decay for AdamW
+  weight_decay: 0.01
+  # Warmup steps: 2000 is MMF default
+  warmup_steps: 2000
+  # Early stopping patience (epochs without improvement)
+  early_stopping_patience: 5
+  # Gradient clipping max norm
+  gradient_clip: 1.0
+
+  # Loss function: "ce", "focal", "label_smoothing", "focal_smoothing"
+  # focal loss improves performance on imbalanced datasets (+1-2% AUROC)
+  loss_type: "focal"
+  # Focal loss alpha: weight for minority class (~35% hateful in training)
+  focal_alpha: 0.35
+  # Focal loss gamma: focusing parameter (higher = more focus on hard examples)
+  focal_gamma: 2.0
+  # Label smoothing factor (0.1 is typical)
+  label_smoothing: 0.1
+
+# ViLBERT Model Parameters (HuggingFace version - current baseline)
 vilbert:
   # HuggingFace model for pretrained weights
   huggingface_model: "visualjoyce/transformers4vl-vilbert"
   num_labels: 2
-  freeze_bert_layers: 6
+  # Number of BERT layers to freeze (0 = train all, 6 = freeze first 6)
+  # For best results, set to 0 (train all layers)
+  freeze_bert_layers: 0
   max_seq_length: 128
-  # Image processing
-  image_size: 224
+
+  # Visual feature extraction
+  # Options: "resnet" (faster, ~0.65 AUROC) or "clip" (slower, ~0.68-0.70 AUROC)
+  feature_extractor: "resnet"
   max_regions: 36
   visual_feature_dim: 2048
+  image_size: 224
+
   # Directory to save trained models
   output_dir: "data/05_model_output"
-  # Path to locally trained checkpoint (used by vilbert_validate and vilbert_inference_local)
+  # Path to locally trained checkpoint
   checkpoint_path: "data/05_model_output/vilbert_best.pt"
+
+# ViLBERT with Faster R-CNN Features + Facebook Official Weights
+# Use this for comparison with Facebook's baseline (expected AUROC ~0.70)
+# Run with: kedro run --pipeline=vilbert_frcnn_train
+vilbert_frcnn:
+  # Path to Facebook's official pretrained weights (Conceptual Captions)
+  # Download with: python scripts/download_weights.py --source vilbert_cc --output ./weights/
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # Faster R-CNN feature extraction (object-based, similar to Facebook's setup)
+  # Note: Facebook used ResNeXt-152 on Visual Genome, we use ResNet-50-FPN on COCO
+  feature_extractor: "fasterrcnn"
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 224
+  # Confidence threshold for object detection (lower = more regions from detected objects)
+  frcnn_confidence_threshold: 0.2
+
+  # Output directory for FRCNN model
+  output_dir: "data/05_model_output/frcnn"
+  checkpoint_path: "data/05_model_output/frcnn/vilbert_frcnn_best.pt"
+
+# Training parameters for FRCNN model (can be customized separately)
+training_frcnn:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "focal"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.1
+
+# ViLBERT with Visual Genome Faster R-CNN Features
+# This configuration uses Faster R-CNN pretrained on Visual Genome (1600 classes)
+# which matches Facebook's original ViLBERT setup more closely than COCO.
+# Expected AUROC: ~0.68-0.72 (closer to Facebook's 0.7045 baseline)
+# Run with: kedro run --pipeline=vilbert_vg_train
+vilbert_vg:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # Visual Genome Faster R-CNN feature extraction
+  # Download weights from: https://drive.google.com/file/d/18n_3V1rywgeADZ3oONO0DsuuS9eMW6sN/view
+  feature_extractor: "fasterrcnn_vg"
+  # Path to Visual Genome pretrained Faster R-CNN weights
+  vg_weights_path: "weights/faster_rcnn_res101_vg.pth"
+  # Facebook uses 100 regions per image (from detectron.lmdb)
+  max_regions: 100
+  visual_feature_dim: 2048
+  image_size: 224
+  # Lower threshold to get more region proposals
+  frcnn_confidence_threshold: 0.2
+  nms_threshold: 0.3
+
+  # Output directory
+  output_dir: "data/05_model_output/vg"
+  checkpoint_path: "data/05_model_output/vg/vilbert_vg_best.pt"
+
+# Training parameters for Visual Genome model
+# Facebook MMF exact settings from: projects/vilbert/configs/hateful_memes/defaults.yaml
+# Reference: https://github.com/facebookresearch/mmf/issues/290
+training_vg:
+  batch_size: 32
+  # Facebook uses max_updates=22000, with batch_size=32 and 8500 train samples
+  # 22000 updates / 266 steps per epoch = ~83 epochs
+  num_epochs: 83
+  # Facebook exact LR: 1e-5 (NOT 5e-5)
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  # Facebook exact warmup: 2000 steps
+  warmup_steps: 2000
+  # Disable early stopping to match Facebook's full 22000 updates
+  # Set to very high value to effectively disable
+  early_stopping_patience: 100
+  gradient_clip: 1.0
+  # Facebook uses cross-entropy, not focal loss
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  # Enable linear decay scheduler (warmup_linear)
+  use_linear_decay: true
+
+# ViLBERT with PRECOMPUTED Visual Genome Features (Facebook-style)
+# This is the closest match to Facebook's original setup:
+# - Features are extracted ONCE and cached in HDF5 (like detectron.lmdb)
+# - 100 regions per image with consistent features across epochs
+# - No on-the-fly extraction noise
+# Run with: kedro run --pipeline=vilbert_precomputed_train
+vilbert_precomputed:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+  # Precomputed features settings
+  max_regions: 100
+  visual_feature_dim: 2048
+  # Paths to precomputed features (generated by scripts/extract_features.py)
+  precomputed_features_path: "data/03_features/vg_features_100.h5"
+  precomputed_id_map_path: "data/03_features/vg_features_100_id_map.npy"
+  # Output directory
+  output_dir: "data/05_model_output/precomputed"
+  checkpoint_path: "data/05_model_output/precomputed/vilbert_precomputed_best.pt"
+
+# Training parameters for precomputed features model
+# Facebook MMF exact settings
+training_precomputed:
+  batch_size: 32
+  # Facebook uses max_updates=22000
+  num_epochs: 83
+  # Facebook exact LR: 1e-5
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  # Early stopping when no improvement
+  early_stopping_patience: 10
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with Facebook's Official LMDB Features (detectron.lmdb)
+# This uses Facebook's EXACT precomputed features extracted with ResNeXt-152
+# on Visual Genome (the same features used in their baseline).
+# Expected AUROC: ~0.70 (matching Facebook's 0.7045 baseline)
+# Run with: kedro run --pipeline=vilbert_lmdb_train
+vilbert_lmdb:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+  # Facebook's official LMDB features (extracted with ResNeXt-152 on VG)
+  # Features: 2048-dim from ResNeXt-152-32x8d with attribute loss
+  # 100 regions per image, same as Facebook baseline
+  lmdb_path: "data/03_features/mmf/detectron.lmdb"
+  max_regions: 100
+  visual_feature_dim: 2048
+  # Output directory
+  output_dir: "data/05_model_output/lmdb"
+  checkpoint_path: "data/05_model_output/lmdb/vilbert_lmdb_best.pt"
+
+# Training parameters for LMDB model
+# Facebook MMF exact settings
+training_lmdb:
+  batch_size: 32
+  # Reduced epochs - best AUROC achieved by epoch 7
+  num_epochs: 20
+  # Facebook exact LR: 1e-5
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  # Early stopping when no improvement
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with Facebook's X-152++ Features (grid-feats-vqa)
+# This uses Facebook's state-of-the-art X-152++ model from grid-feats-vqa
+# which won the 2020 VQA Challenge. Features are extracted on-the-fly.
+# Expected AUROC: ~0.72-0.75 (potentially better than LMDB)
+# Run with: kedro run --pipeline=vilbert_x152_train
+# Requires: pip install 'git+https://github.com/facebookresearch/detectron2.git'
+vilbert_x152:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+  # X-152++ feature extraction (state-of-the-art from 2020 VQA Challenge)
+  # Download weights: https://dl.fbaipublicfiles.com/grid-feats-vqa/X-152pp/X-152pp.pth
+  feature_extractor: "grid_x152"
+  x152_weights_path: "weights/X-152pp.pth"
+  # Use 100 regions like Facebook baseline
+  max_regions: 100
+  visual_feature_dim: 2048
+  # Detection thresholds
+  confidence_threshold: 0.2
+  nms_threshold: 0.5
+  # Auto-download weights if not found
+  auto_download_weights: true
+  # Output directory
+  output_dir: "data/05_model_output/x152"
+  checkpoint_path: "data/05_model_output/x152/vilbert_x152_best.pt"
+
+# Training parameters for X-152++ model
+# Same as LMDB settings since we want to compare feature quality
+training_x152:
+  batch_size: 32
+  num_epochs: 20
+  # Facebook exact LR: 1e-5
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true

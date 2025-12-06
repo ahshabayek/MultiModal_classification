@@ -2,6 +2,7 @@
 Data Processing Nodes for Hateful Memes Classification
 
 Uses HuggingFace datasets to load the hateful memes dataset with images.
+Supports caption enrichment for improved performance (+2-6% AUROC).
 """
 
 import logging
@@ -17,6 +18,46 @@ from datasets import load_dataset
 from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
+
+
+def enrich_with_captions(
+    df: pd.DataFrame,
+    parameters: Dict[str, Any],
+) -> pd.DataFrame:
+    """
+    Enrich dataset with image captions using BLIP.
+
+    This implements Caption Enriched Samples (CES) which improved
+    ViLBERT AUROC by +2-6% on Hateful Memes.
+
+    Reference: "Caption Enriched Samples for Improving Hateful Memes Detection" (EMNLP 2021)
+    """
+    if not parameters.get("use_captions", False):
+        return df
+
+    try:
+        from .augmentation import enrich_with_captions as _enrich
+    except ImportError:
+        from augmentation import enrich_with_captions as _enrich
+
+    cache_path = parameters.get(
+        "caption_cache_path", "data/02_intermediate/captions.csv"
+    )
+
+    logger.info("Enriching dataset with image captions...")
+    df = _enrich(
+        df,
+        image_column="img_path",
+        text_column="text",
+        output_column="text_enriched",
+        cache_path=cache_path,
+    )
+
+    # Use enriched text as the main text
+    df["text_original"] = df["text"]
+    df["text"] = df["text_enriched"]
+
+    return df
 
 
 def load_hateful_memes_from_huggingface(
@@ -239,23 +280,32 @@ def preprocess_data(df: pd.DataFrame, parameters: Dict[str, Any]) -> pd.DataFram
 def process_train_data(
     train_df: pd.DataFrame, parameters: Dict[str, Any]
 ) -> pd.DataFrame:
-    """Process training data."""
+    """Process training data with optional caption enrichment."""
     logger.info("Processing training data...")
-    return preprocess_data(train_df, parameters)
+    df = preprocess_data(train_df, parameters)
+
+    # Add caption enrichment if enabled
+    df = enrich_with_captions(df, parameters)
+
+    return df
 
 
 def process_val_data(val_df: pd.DataFrame, parameters: Dict[str, Any]) -> pd.DataFrame:
-    """Process validation data."""
+    """Process validation data with optional caption enrichment."""
     logger.info("Processing validation data...")
-    return preprocess_data(val_df, parameters)
+    df = preprocess_data(val_df, parameters)
+    df = enrich_with_captions(df, parameters)
+    return df
 
 
 def process_test_data(
     test_df: pd.DataFrame, parameters: Dict[str, Any]
 ) -> pd.DataFrame:
-    """Process test data."""
+    """Process test data with optional caption enrichment."""
     logger.info("Processing test data...")
-    return preprocess_data(test_df, parameters)
+    df = preprocess_data(test_df, parameters)
+    df = enrich_with_captions(df, parameters)
+    return df
 
 
 def compute_dataset_statistics(

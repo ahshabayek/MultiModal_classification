@@ -40,16 +40,19 @@ env/
 .viz/
 
 # Data - Do not track large data files
-data/01_raw/hateful_memes/img/
-data/01_raw/hateful_memes/img.tar.gz
-data/01_raw/hateful_memes/*.part
+data/01_raw/
 data/02_intermediate/
+data/03_features/
 data/03_primary/
 data/04_feature/
-data/05_model_output/*.pt
+data/04_models/
+data/05_model_output/
 data/06_models/
 data/07_model_output/
 data/08_reporting/
+
+# Weights
+weights/
 
 # Keep directory structure
 !data/**/.gitkeep
