@@ -21,13 +21,29 @@ data_processing:
 
 # Training Parameters (Facebook MMF baseline + improvements)
 # Reference: https://github.com/facebookresearch/mmf/issues/290
+# =============================================================================
+# TUNING EXPERIMENT LOG
+# =============================================================================
+# This section documents hyperparameter tuning experiments.
+#
+# Baseline Results (before tuning):
+#   vilbert_train (HF, 5e-5, focal): 0.6645 AUROC
+#   vilbert_frcnn_train (5e-5, focal): 0.6235 AUROC
+#   vilbert_vg_train (1e-5, CE): 0.6367 AUROC
+#
+# Tuning Strategy:
+#   1. Standardize to 1e-5 + CE (matches best-performing models)
+#   2. Test different warmup periods
+#   3. Compare results
+# =============================================================================
+
 training:
   # Batch size: 32 is MMF default, adjust based on GPU memory
   batch_size: 32
   # Number of epochs (with early stopping)
   num_epochs: 20
-  # Learning rate: 5e-5 is the MMF/BERT default
-  learning_rate: 5.0e-5
+  # TUNED: Changed from 5e-5 to 1e-5 (matches Facebook models)
+  learning_rate: 1.0e-5
   # Weight decay for AdamW
   weight_decay: 0.01
   # Warmup steps: 2000 is MMF default
@@ -37,15 +53,16 @@ training:
   # Gradient clipping max norm
   gradient_clip: 1.0
 
-  # Loss function: "ce", "focal", "label_smoothing", "focal_smoothing"
-  # focal loss improves performance on imbalanced datasets (+1-2% AUROC)
-  loss_type: "focal"
+  # TUNED: Changed from focal to CE (matches Facebook models)
+  loss_type: "ce"
   # Focal loss alpha: weight for minority class (~35% hateful in training)
   focal_alpha: 0.35
   # Focal loss gamma: focusing parameter (higher = more focus on hard examples)
   focal_gamma: 2.0
   # Label smoothing factor (0.1 is typical)
-  label_smoothing: 0.1
+  label_smoothing: 0.0
+  # Linear decay schedule
+  use_linear_decay: true
 
 # ViLBERT Model Parameters (HuggingFace version - current baseline)
 vilbert:
@@ -94,6 +111,10 @@ vilbert_frcnn:
   checkpoint_path: "data/05_model_output/frcnn/vilbert_frcnn_best.pt"
 
 # Training parameters for FRCNN model (can be customized separately)
+# TUNING EXPERIMENT 2: Try 5e-5 + CE (higher LR, different loss)
+# Original: 0.6235 AUROC with 5e-5 + focal
+# Experiment 1 (1e-5 + CE): Not run yet
+# Experiment 2 (5e-5 + CE): Testing now
 training_frcnn:
   batch_size: 32
   num_epochs: 20
@@ -102,10 +123,165 @@ training_frcnn:
   warmup_steps: 2000
   early_stopping_patience: 5
   gradient_clip: 1.0
-  loss_type: "focal"
+  loss_type: "ce"
   focal_alpha: 0.35
   focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with Faster R-CNN ResNet-152 FPN Features + Facebook Official Weights
+# This uses a stronger ResNet-152 backbone (vs ResNet-50 in vilbert_frcnn)
+# to test if a deeper backbone improves feature quality for ViLBERT.
+# Expected AUROC: ~0.65-0.68 (potentially better than ResNet-50 FRCNN's 0.6235)
+# Run with: kedro run --pipeline=vilbert_frcnn_resnet152_train
+vilbert_frcnn_resnet152:
+  # Path to Facebook's official pretrained weights (Conceptual Captions)
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # Faster R-CNN ResNet-152 FPN feature extraction
+  # Uses ResNet-152 backbone (vs ResNet-50 in standard FRCNN)
+  # Detection head initialized from ResNet-50 FPN v2 COCO weights
+  feature_extractor: "fasterrcnn_resnet152"
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 224
+  # Confidence threshold for object detection
+  frcnn_confidence_threshold: 0.2
+
+  # Output directory for ResNet-152 FRCNN model
+  output_dir: "data/05_model_output/frcnn_resnet152"
+  checkpoint_path: "data/05_model_output/frcnn_resnet152/vilbert_frcnn_resnet152_best.pt"
+
+# Training parameters for ResNet-152 FRCNN model
+# Using same settings as LMDB (which achieved best results) for fair comparison
+training_frcnn_resnet152:
+  batch_size: 32
+  num_epochs: 20
+  # Using lower LR like LMDB (better results than 5e-5)
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  # Using CE loss like LMDB (better than focal for this task)
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with DINOv2 Vision Transformer Features
+# This configuration uses Meta's DINOv2 self-supervised ViT for visual features.
+# DINOv2 provides semantically rich patch features without object detection domain bias.
+# Expected AUROC: ~0.68-0.72 (better than COCO FRCNN, potentially matching grid features)
+# Run with: kedro run --pipeline=vilbert_dinov2_train
+vilbert_dinov2:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  # FREEZE EXPERIMENT RESULT (fixed): freeze=6 had negligible effect (-0.03%)
+  # Keeping freeze=0 as default
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # DINOv2 Vision Transformer feature extraction
+  feature_extractor: "dinov2"
+  # Model size: "small" (384-dim), "base" (768-dim), "large" (1024-dim), "giant" (1536-dim)
+  dinov2_model_size: "large"
+  # 36 regions works best for DINOv2 (100 regions causes overfitting)
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 518 # DINOv2 uses 518x518 input
+
+  # Region selection strategy:
+  # - "interpolate": Bilinear interpolation from patch grid (baseline: 0.7056 AUROC)
+  # - "attention": Select top-K patches by self-attention score (recommended)
+  region_selection: "attention"
+
+  # Output directory
+  output_dir: "data/05_model_output/dinov2"
+
+# Training config for DINOv2
+# TUNING EXPERIMENT: Try higher LR since only projection trains
+# Original (1e-5): 0.7056 AUROC - good but projection layer may need more signal
+# Experiment: 5e-5 + focal loss (DINOv2 frozen, only projection trains)
+training_dinov2:
+  # BATCH SIZE TUNING RESULTS:
+  # Batch=16: 0.7069 AUROC (+0.13%) <- BEST
+  # Batch=32: 0.7056 AUROC (original)
+  # Batch=64: 0.6847 AUROC (-2.09%)
+  batch_size: 16
+  num_epochs: 20
+  # Original best settings (1e-5, CE)
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  # LABEL SMOOTHING TUNING RESULTS:
+  # 0.0: 0.7069 AUROC <- BEST
+  # 0.1: 0.6952 AUROC (-1.17%)
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with DINOv2 Multi-Layer Feature Fusion
+# This configuration extracts features from multiple DINOv2 transformer layers
+# and fuses them to capture both low-level patterns and high-level semantics.
+# Hypothesis: Earlier layers capture text-in-image patterns, later layers capture semantics.
+# Expected AUROC: ~0.71-0.73 (better than single-layer 0.7056)
+# Run with: kedro run --pipeline=vilbert_dinov2_multilayer_train
+vilbert_dinov2_multilayer:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  # FREEZE EXPERIMENT RESULT (fixed): freeze=6 had negligible effect (-0.03%)
+  # Keeping freeze=0 as default
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # DINOv2 Multi-Layer feature extraction
+  feature_extractor: "dinov2_multilayer"
+  # Model size: "small", "base", "large", "giant"
+  dinov2_model_size: "large"
+  # Layers to extract features from (1-indexed)
+  # For ViT-L (24 layers): [6, 12, 18, 24] captures low to high level
+  dinov2_layer_indices: [6, 12, 18, 24]
+  # Fusion strategy: "concat", "weighted_sum", "attention"
+  # - concat: Concatenate all layers then project (simple, effective)
+  # - weighted_sum: Learn weights for each layer (fewer params)
+  # - attention: Cross-layer attention pooling (most expressive)
+  dinov2_fusion_strategy: "concat"
+  # Number of regions (36 = 6x6 grid)
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 518
+
+  # Output directory
+  output_dir: "data/05_model_output/dinov2_multilayer"
+
+# Training config for DINOv2 Multi-Layer
+training_dinov2_multilayer:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  # LABEL SMOOTHING TUNING RESULTS:
+  # 0.0: 0.7067 AUROC
+  # 0.1: 0.7171 AUROC (+1.04%) <- BEST
   label_smoothing: 0.1
+  use_linear_decay: true
 
 # ViLBERT with Visual Genome Faster R-CNN Features
 # This configuration uses Faster R-CNN pretrained on Visual Genome (1600 classes)
@@ -137,28 +313,212 @@ vilbert_vg:
   checkpoint_path: "data/05_model_output/vg/vilbert_vg_best.pt"
 
 # Training parameters for Visual Genome model
-# Facebook MMF exact settings from: projects/vilbert/configs/hateful_memes/defaults.yaml
-# Reference: https://github.com/facebookresearch/mmf/issues/290
+# TUNING EXPERIMENT: Try 5e-6 LR with 4000 warmup steps
+# Original (1e-5, warmup=2000): 0.6367 AUROC - showed early degradation
+# Hypothesis: VG features may need gentler training due to domain mismatch
 training_vg:
   batch_size: 32
-  # Facebook uses max_updates=22000, with batch_size=32 and 8500 train samples
-  # 22000 updates / 266 steps per epoch = ~83 epochs
-  num_epochs: 83
-  # Facebook exact LR: 1e-5 (NOT 5e-5)
-  learning_rate: 1.0e-5
+  # Reduced epochs with early stopping
+  num_epochs: 20
+  # TUNED: Lower LR to prevent early degradation
+  learning_rate: 5.0e-6
   weight_decay: 0.01
-  # Facebook exact warmup: 2000 steps
-  warmup_steps: 2000
-  # Disable early stopping to match Facebook's full 22000 updates
-  # Set to very high value to effectively disable
-  early_stopping_patience: 100
+  # TUNED: Longer warmup for smoother training
+  warmup_steps: 4000
+  # Re-enable early stopping
+  early_stopping_patience: 5
   gradient_clip: 1.0
-  # Facebook uses cross-entropy, not focal loss
+  # Keep CE loss
   loss_type: "ce"
   focal_alpha: 0.35
   focal_gamma: 2.0
   label_smoothing: 0.0
   # Enable linear decay scheduler (warmup_linear)
+  use_linear_decay: true
+
+# ViLBERT with Visual Genome Faster R-CNN + Trained RPN
+# This configuration uses the TRAINED RPN from the Visual Genome checkpoint
+# instead of grid-based proposals, which should significantly improve results.
+# Key difference from vilbert_vg: Uses learned region proposals from VG RPN
+# Expected AUROC: ~0.70-0.73 (should be close to LMDB 0.7433)
+# Run with: kedro run --pipeline=vilbert_vg_rpn_train
+vilbert_vg_rpn:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # Visual Genome Faster R-CNN with trained RPN
+  feature_extractor: "fasterrcnn_vg_rpn"
+  # Path to Visual Genome pretrained weights (includes RPN)
+  vg_weights_path: "weights/faster_rcnn_res101_vg.pth"
+  # Use 36 regions (same as DINOv2 best config)
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 600
+  # RPN proposal filtering
+  nms_threshold: 0.7
+  pre_nms_top_n: 6000
+  post_nms_top_n: 300
+
+  # Output directory
+  output_dir: "data/05_model_output/vg_rpn"
+  checkpoint_path: "data/05_model_output/vg_rpn/vilbert_vg_rpn_best.pt"
+
+# Training parameters for VG RPN model
+training_vg_rpn:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# ViLBERT with Simple VG ResNet-101 Backbone (no detection)
+# This uses ONLY the ResNet-101 backbone from the VG checkpoint
+# with simple grid-based pooling (like ResNet-152 extractor).
+# NO RPN, NO ROI pooling, NO detection head.
+# Expected AUROC: ~0.67+ (should beat ImageNet ResNet-152's 0.6645)
+# Run with: kedro run --pipeline=vilbert_resnet_vg_train
+vilbert_resnet_vg:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # Simple VG ResNet-101 with grid features (no detection)
+  feature_extractor: "resnet_vg"
+  # Path to Visual Genome pretrained weights (only backbone loaded)
+  vg_weights_path: "weights/faster_rcnn_res101_vg.pth"
+  # 36 regions = 6x6 grid (same as ResNet-152 baseline)
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 224
+
+  # Output directory
+  output_dir: "data/05_model_output/resnet_vg"
+  checkpoint_path: "data/05_model_output/resnet_vg/vilbert_resnet_vg_best.pt"
+
+# ViLBERT with ResNet-152 + ROI Pooling (ImageNet backbone + detection pipeline)
+# This tests whether ROI pooling helps with an ImageNet backbone (no VG/COCO detection training).
+# Key hypothesis: ROI pooling on multi-scale proposals may capture better object-centric
+# features than simple grid pooling, even without detection pretraining.
+# Comparison:
+#   - vilbert_train (ResNet-152 + grid): 0.6645 AUROC
+#   - vilbert_frcnn_resnet152_train (ResNet-152 + COCO detection): 0.6334 AUROC
+#   - This model (ResNet-152 + ROI pooling, no detection): ???
+# Run with: kedro run --pipeline=vilbert_resnet152_roi_train
+vilbert_resnet152_roi:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  # FREEZE EXPERIMENT RESULT (fixed): freeze=6 had negligible effect (-0.03%)
+  # Keeping freeze=0 as default
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # ResNet-152 with ROI pooling (ImageNet backbone, no detection training)
+  feature_extractor: "resnet152_roi"
+  # REGION COUNT TUNING RESULTS:
+  # 36 regions (6x6): 0.7197 AUROC <- BEST
+  # 49 regions (7x7): 0.7008 AUROC (-1.89%)
+  # 64 regions (8x8): 0.7141 AUROC (-0.56%)
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 600
+  # ROI pooling size (before layer4)
+  roi_size: 14
+  # Use multi-scale proposals (vs simple grid)
+  use_multi_scale: true
+
+  # Output directory
+  output_dir: "data/05_model_output/resnet152_roi"
+  checkpoint_path: "data/05_model_output/resnet152_roi/vilbert_resnet152_roi_best.pt"
+
+# Training parameters for ResNet-152 ROI model
+training_resnet152_roi:
+  # BATCH SIZE TUNING RESULTS:
+  # Batch=16: 0.7180 AUROC (-0.17%)
+  # Batch=32: 0.7197 AUROC <- BEST (original)
+  # Batch=64: 0.7141 AUROC (-0.56%)
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  # LABEL SMOOTHING TUNING RESULTS:
+  # 0.0: 0.7197 AUROC <- BEST
+  # 0.1: 0.7045 AUROC (-1.52%)
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# =============================================================================
+# ResNet-152 Grid (Facebook CC weights, NO ROI pooling)
+# =============================================================================
+# This is a control experiment to isolate the effect of ROI pooling.
+# Same ViLBERT weights as vilbert_resnet152_roi, but with simple grid pooling.
+# Comparison:
+#   - vilbert_resnet152_roi_train (Facebook CC + ROI pooling): 0.7197 AUROC
+#   - This model (Facebook CC + grid pooling): ???
+# Run with: kedro run --pipeline=vilbert_resnet152_grid_train
+vilbert_resnet152_grid:
+  # Path to Facebook's official pretrained weights
+  facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
+  num_labels: 2
+  freeze_bert_layers: 0
+  max_seq_length: 128
+
+  # ResNet-152 with simple grid pooling (NO ROI)
+  feature_extractor: "resnet"
+  max_regions: 36
+  visual_feature_dim: 2048
+  image_size: 224
+
+  # Output directory
+  output_dir: "data/05_model_output/resnet152_grid"
+  checkpoint_path: "data/05_model_output/resnet152_grid/vilbert_resnet152_grid_best.pt"
+
+# Training parameters for ResNet-152 Grid model (Facebook CC weights)
+training_resnet152_grid:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
+  use_linear_decay: true
+
+# Training parameters for VG ResNet-101 model
+training_resnet_vg:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  warmup_steps: 2000
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"
+  focal_alpha: 0.35
+  focal_gamma: 2.0
+  label_smoothing: 0.0
   use_linear_decay: true
 
 # ViLBERT with PRECOMPUTED Visual Genome Features (Facebook-style)
@@ -211,6 +571,8 @@ vilbert_lmdb:
   # Path to Facebook's official pretrained weights
   facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
   num_labels: 2
+  # FREEZE EXPERIMENT RESULT (fixed): freeze=6 had negligible effect (-0.03%)
+  # Keeping freeze=0 as default
   freeze_bert_layers: 0
   max_seq_length: 128
   # Facebook's official LMDB features (extracted with ResNeXt-152 on VG)
@@ -226,7 +588,11 @@ vilbert_lmdb:
 # Training parameters for LMDB model
 # Facebook MMF exact settings
 training_lmdb:
-  batch_size: 32
+  # BATCH SIZE TUNING RESULTS:
+  # Batch=16: 0.7580 AUROC (+1.47%) <- BEST
+  # Batch=32: 0.7433 AUROC (original)
+  # Batch=64: 0.7434 AUROC
+  batch_size: 16
   # Reduced epochs - best AUROC achieved by epoch 7
   num_epochs: 20
   # Facebook exact LR: 1e-5

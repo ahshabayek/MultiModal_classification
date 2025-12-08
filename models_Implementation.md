@@ -543,8 +543,10 @@ Visual preprocessing varies by **feature extractor type**. There are 4 approache
 
 ### Approach 3: Faster R-CNN (Object Detection)
 
-**File**: `src/multimodalclassification/models/feature_extractors/fasterrcnn.py` (COCO)
-**File**: `src/multimodalclassification/models/feature_extractors/fasterrcnn_vg.py` (Visual Genome)
+**Files**:
+- `src/multimodalclassification/models/feature_extractors/fasterrcnn.py` (ResNet-50 COCO) - AUROC: 0.6235
+- `src/multimodalclassification/models/feature_extractors/fasterrcnn_resnet152.py` (ResNet-152 COCO) - AUROC: 0.6334
+- `src/multimodalclassification/models/feature_extractors/fasterrcnn_vg.py` (Visual Genome)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -564,8 +566,9 @@ Visual preprocessing varies by **feature extractor type**. There are 4 approache
 │   ┌──────────────────────────────────────┐                                  │
 │   │ Faster R-CNN Detector                │                                  │
 │   │                                      │                                  │
-│   │ COCO version:                        │                                  │
+│   │ COCO versions:                       │                                  │
 │   │   ResNet-50-FPN, 91 classes          │                                  │
+│   │   ResNet-152-FPN, 91 classes         │                                  │
 │   │                                      │                                  │
 │   │ Visual Genome version:               │                                  │
 │   │   ResNet-101, 1600 classes           │                                  │
@@ -605,11 +608,97 @@ Visual preprocessing varies by **feature extractor type**. There are 4 approache
 
 **Pros**: Object-centric features, actual detected regions
 **Cons**: Slower, COCO has domain mismatch with ViLBERT pretraining
-**Expected AUROC**: ~0.62-0.68 (COCO), ~0.68-0.72 (Visual Genome)
+
+**Achieved AUROC**:
+- ResNet-50 COCO: 0.6235
+- ResNet-152 COCO: 0.6334 (+1% from backbone scaling)
+- Visual Genome: Not tested
+
+**Backbone Scaling Experiment**: Upgrading from ResNet-50 to ResNet-152 provides only marginal improvement (~1%), confirming that domain mismatch (COCO 80 classes vs VG 1600 classes) is the primary bottleneck, not backbone capacity.
 
 ---
 
-### Approach 4: LMDB Precomputed Features (Facebook's Approach)
+### Approach 4: DINOv2 Vision Transformer (Best Non-LMDB)
+
+**File**: `src/multimodalclassification/models/feature_extractors/dinov2.py`
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DINOv2 FEATURE EXTRACTION                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Raw Image (any size)                                                      │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌──────────────────────────────────────┐                                  │
+│   │ 1. Resize to 518×518                 │                                  │
+│   │ 2. Center crop                       │                                  │
+│   │ 3. ToTensor + Normalize              │                                  │
+│   │    (ImageNet mean/std)               │                                  │
+│   └──────────────────────────────────────┘                                  │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌──────────────────────────────────────┐                                  │
+│   │ DINOv2 Vision Transformer            │                                  │
+│   │                                      │                                  │
+│   │ Models available:                    │                                  │
+│   │   ViT-S/14:  384-dim,  21M params    │                                  │
+│   │   ViT-B/14:  768-dim,  86M params    │                                  │
+│   │   ViT-L/14: 1024-dim, 304M params    │  ◄── Used                        │
+│   │   ViT-g/14: 1536-dim, 1.1B params    │                                  │
+│   │                                      │                                  │
+│   │ Self-supervised on LVD-142M          │                                  │
+│   │ (142M curated images)                │                                  │
+│   └──────────────────────────────────────┘                                  │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌──────────────────────────────────────┐                                  │
+│   │ Extract patch tokens                 │                                  │
+│   │ 518/14 = 37×37 = 1369 patches        │                                  │
+│   │ Remove CLS token                     │                                  │
+│   └──────────────────────────────────────┘                                  │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌──────────────────────────────────────┐                                  │
+│   │ Projection layer                     │                                  │
+│   │ 1024 → 2048 (with LayerNorm + GELU)  │                                  │
+│   └──────────────────────────────────────┘                                  │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌──────────────────────────────────────┐                                  │
+│   │ Interpolate to target grid           │                                  │
+│   │ 37×37 → 6×6 = 36 regions             │                                  │
+│   └──────────────────────────────────────┘                                  │
+│                                                                             │
+│   OUTPUT:                                                                   │
+│   - visual_features: [36, 2048]                                             │
+│   - spatial_locations: [36, 5] (grid-based)                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Pros**: 
+- No domain mismatch (self-supervised, not limited to specific classes)
+- Dense semantic features from every patch
+- State-of-the-art visual representations
+- Modern transformer architecture
+
+**Cons**: 
+- Slower than precomputed features
+- Large model (304M params for ViT-L)
+- Requires downloading model on first run (~1.1GB)
+
+**Achieved AUROC**: **0.7056** - Best non-LMDB result, exceeds Facebook baseline!
+
+**Why DINOv2 > Faster R-CNN**:
+- Self-supervised on 142M diverse images vs COCO's 80 object classes
+- Each patch is independently meaningful (dense features)
+- No object detection pipeline bottleneck
+- Captures meme-relevant content (text, faces, symbols)
+
+---
+
+### Approach 5: LMDB Precomputed Features (Facebook's Approach)
 
 **File**: `src/multimodalclassification/pipelines/data_processing/lmdb_dataset.py`
 
@@ -746,7 +835,7 @@ vilbert:
   max_seq_length: 128        # Max text tokens
   max_regions: 36            # Regions for on-the-fly extraction
   visual_feature_dim: 2048   # Feature dimension
-  feature_extractor: "resnet"  # Options: resnet, clip, fasterrcnn, fasterrcnn_vg
+  feature_extractor: "resnet"  # Options: resnet, clip, fasterrcnn, fasterrcnn_resnet152, fasterrcnn_vg
 
 vilbert_lmdb:
   max_seq_length: 128

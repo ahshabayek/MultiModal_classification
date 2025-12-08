@@ -6,7 +6,9 @@ This module provides various visual feature extractors for multimodal models.
 Available Extractors:
     - ResNetFeatureExtractor: Grid-based features using ResNet-152
     - CLIPFeatureExtractor: Semantic features using CLIP
+    - DINOv2FeatureExtractor: Self-supervised ViT features using Meta's DINOv2
     - FasterRCNNFeatureExtractor: Object-based features using Faster R-CNN (COCO)
+    - FasterRCNNResNet152Extractor: Object-based features using Faster R-CNN ResNet-152 (COCO)
     - FasterRCNNVGExtractor: Object-based features using Faster R-CNN (Visual Genome)
     - GridFeatsX152Extractor: Facebook's X-152++ from grid-feats-vqa (best quality)
     - GridFeatsX152StandardExtractor: Facebook's standard X-152
@@ -17,14 +19,23 @@ Usage:
     extractor = get_feature_extractor("resnet", output_dim=2048, num_regions=36)
     features, spatial = extractor.extract_features(image)
 
+    # For DINOv2 (recommended for ViT-based features):
+    extractor = get_feature_extractor("dinov2", model_size="large", output_dim=2048)
+
     # For best quality features (requires detectron2):
     extractor = get_feature_extractor("grid_x152", weights_path="weights/X-152pp.pth")
 """
 
 from .clip import CLIPFeatureExtractor
+from .dinov2 import DINOv2FeatureExtractor
+from .dinov2_multilayer import DINOv2MultiLayerExtractor
 from .fasterrcnn import FasterRCNNFeatureExtractor
+from .fasterrcnn_resnet152 import FasterRCNNResNet152Extractor
 from .fasterrcnn_vg import FasterRCNNVGExtractor, download_vg_weights
+from .fasterrcnn_vg_rpn import FasterRCNNVGRPNExtractor
 from .resnet import ResNetFeatureExtractor
+from .resnet152_roi import ResNet152ROIExtractor
+from .resnet_vg import ResNetVGExtractor
 
 # Conditionally import grid features extractor (requires detectron2)
 try:
@@ -44,8 +55,14 @@ except ImportError:
 __all__ = [
     "ResNetFeatureExtractor",
     "CLIPFeatureExtractor",
+    "DINOv2FeatureExtractor",
+    "DINOv2MultiLayerExtractor",
     "FasterRCNNFeatureExtractor",
+    "FasterRCNNResNet152Extractor",
     "FasterRCNNVGExtractor",
+    "FasterRCNNVGRPNExtractor",
+    "ResNetVGExtractor",
+    "ResNet152ROIExtractor",
     "GridFeatsX152Extractor",
     "GridFeatsX152StandardExtractor",
     "get_feature_extractor",
@@ -84,8 +101,14 @@ def get_feature_extractor(name: str, **kwargs):
     extractors = {
         "resnet": ResNetFeatureExtractor,
         "clip": CLIPFeatureExtractor,
+        "dinov2": DINOv2FeatureExtractor,
+        "dinov2_multilayer": DINOv2MultiLayerExtractor,
         "fasterrcnn": FasterRCNNFeatureExtractor,
+        "fasterrcnn_resnet152": FasterRCNNResNet152Extractor,
         "fasterrcnn_vg": FasterRCNNVGExtractor,
+        "fasterrcnn_vg_rpn": FasterRCNNVGRPNExtractor,
+        "resnet_vg": ResNetVGExtractor,
+        "resnet152_roi": ResNet152ROIExtractor,
     }
 
     # Add grid features extractors if detectron2 is available

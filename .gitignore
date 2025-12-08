@@ -51,9 +51,6 @@ data/06_models/
 data/07_model_output/
 data/08_reporting/
 
-# Weights
-weights/
-
 # Keep directory structure
 !data/**/.gitkeep
 

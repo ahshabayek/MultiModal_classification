@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from typing import Any, Dict, List, Tuple
 
 import mlflow
@@ -23,6 +24,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm import tqdm
+
+# Disable tqdm if not running interactively (prevents I/O errors in background)
+TQDM_DISABLE = not sys.stdout.isatty()
 from transformers import BertTokenizer
 
 logging.basicConfig(level=logging.INFO)
@@ -209,6 +213,7 @@ def _load_facebook_model(parameters: Dict[str, Any], config_key: str) -> nn.Modu
     """Helper to load ViLBERT with Facebook weights."""
     vilbert_params = parameters.get(config_key, parameters.get("vilbert", {}))
     num_labels = vilbert_params.get("num_labels", 2)
+    freeze_layers = vilbert_params.get("freeze_bert_layers", 0)
     weights_path = vilbert_params.get(
         "facebook_weights_path", "weights/vilbert_pretrained_cc.bin"
     )
@@ -229,6 +234,10 @@ def _load_facebook_model(parameters: Dict[str, Any], config_key: str) -> nn.Modu
         logger.info(f"Loaded {loaded} weight tensors from Facebook checkpoint")
     else:
         logger.warning(f"Facebook weights not found at {weights_path}")
+
+    # Apply layer freezing if specified
+    if freeze_layers > 0:
+        model.freeze_bert_layers(freeze_layers)
 
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -263,12 +272,50 @@ def load_vilbert_facebook(parameters: Dict[str, Any]) -> nn.Module:
     return _load_facebook_model(parameters, "vilbert_frcnn")
 
 
+def load_vilbert_frcnn_resnet152(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for ResNet-152 FRCNN pipeline."""
+    return _load_facebook_model(parameters, "vilbert_frcnn_resnet152")
+
+
 def load_vilbert_vg(parameters: Dict[str, Any]) -> nn.Module:
     return _load_facebook_model(parameters, "vilbert_vg")
 
 
+def load_vilbert_vg_rpn(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for VG RPN pipeline."""
+    return _load_facebook_model(parameters, "vilbert_vg_rpn")
+
+
+def load_vilbert_resnet_vg(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for simple VG ResNet-101 pipeline."""
+    return _load_facebook_model(parameters, "vilbert_resnet_vg")
+
+
+def load_vilbert_resnet152_roi(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for ResNet-152 ROI pooling pipeline."""
+    return _load_facebook_model(parameters, "vilbert_resnet152_roi")
+
+
+def load_vilbert_resnet152_grid(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for ResNet-152 grid pooling pipeline.
+
+    This is a control experiment - same weights as ROI version but no ROI pooling.
+    """
+    return _load_facebook_model(parameters, "vilbert_resnet152_grid")
+
+
 def load_vilbert_lmdb(parameters: Dict[str, Any]) -> nn.Module:
     return _load_facebook_model(parameters, "vilbert_lmdb")
+
+
+def load_vilbert_dinov2(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for DINOv2 pipeline."""
+    return _load_facebook_model(parameters, "vilbert_dinov2")
+
+
+def load_vilbert_dinov2_multilayer(parameters: Dict[str, Any]) -> nn.Module:
+    """Load ViLBERT with Facebook weights for DINOv2 multi-layer pipeline."""
+    return _load_facebook_model(parameters, "vilbert_dinov2_multilayer")
 
 
 def load_vilbert_x152(parameters: Dict[str, Any]) -> nn.Module:
@@ -402,6 +449,21 @@ def create_dataloaders_frcnn(train_data, val_data, test_data, parameters):
     )
 
 
+def create_dataloaders_frcnn_resnet152(train_data, val_data, test_data, parameters):
+    """Create dataloaders with Faster R-CNN ResNet-152 FPN (COCO) features."""
+    vilbert_params = parameters.get("vilbert_frcnn_resnet152", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_frcnn_resnet152",
+        "vilbert_frcnn_resnet152",
+        "fasterrcnn_resnet152",
+        confidence_threshold=vilbert_params.get("frcnn_confidence_threshold", 0.2),
+    )
+
+
 def create_dataloaders_vg(train_data, val_data, test_data, parameters):
     vilbert_params = parameters.get("vilbert_vg", {})
     return _create_dataloaders_with_extractor(
@@ -417,6 +479,109 @@ def create_dataloaders_vg(train_data, val_data, test_data, parameters):
         ),
         confidence_threshold=vilbert_params.get("frcnn_confidence_threshold", 0.2),
         nms_threshold=vilbert_params.get("nms_threshold", 0.3),
+    )
+
+
+def create_dataloaders_vg_rpn(train_data, val_data, test_data, parameters):
+    """Create dataloaders with Visual Genome Faster R-CNN + trained RPN."""
+    vilbert_params = parameters.get("vilbert_vg_rpn", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_vg_rpn",
+        "vilbert_vg_rpn",
+        "fasterrcnn_vg_rpn",
+        weights_path=vilbert_params.get(
+            "vg_weights_path", "weights/faster_rcnn_res101_vg.pth"
+        ),
+        nms_threshold=vilbert_params.get("nms_threshold", 0.7),
+        pre_nms_top_n=vilbert_params.get("pre_nms_top_n", 6000),
+        post_nms_top_n=vilbert_params.get("post_nms_top_n", 300),
+    )
+
+
+def create_dataloaders_resnet_vg(train_data, val_data, test_data, parameters):
+    """Create dataloaders with simple VG ResNet-101 grid features (no detection)."""
+    vilbert_params = parameters.get("vilbert_resnet_vg", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_resnet_vg",
+        "vilbert_resnet_vg",
+        "resnet_vg",
+        weights_path=vilbert_params.get(
+            "vg_weights_path", "weights/faster_rcnn_res101_vg.pth"
+        ),
+    )
+
+
+def create_dataloaders_resnet152_roi(train_data, val_data, test_data, parameters):
+    """Create dataloaders with ResNet-152 ROI pooling features (ImageNet backbone)."""
+    vilbert_params = parameters.get("vilbert_resnet152_roi", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_resnet152_roi",
+        "vilbert_resnet152_roi",
+        "resnet152_roi",
+        roi_size=vilbert_params.get("roi_size", 14),
+        use_multi_scale=vilbert_params.get("use_multi_scale", True),
+    )
+
+
+def create_dataloaders_resnet152_grid(train_data, val_data, test_data, parameters):
+    """Create dataloaders with ResNet-152 grid features (NO ROI pooling).
+
+    This is a control experiment to isolate the effect of ROI pooling.
+    Uses Facebook CC weights but simple grid pooling like vilbert_train.
+    """
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_resnet152_grid",
+        "vilbert_resnet152_grid",
+        "resnet",  # Simple ResNet-152 grid extractor
+    )
+
+
+def create_dataloaders_dinov2(train_data, val_data, test_data, parameters):
+    """Create dataloaders with DINOv2 Vision Transformer features."""
+    vilbert_params = parameters.get("vilbert_dinov2", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_dinov2",
+        "vilbert_dinov2",
+        "dinov2",
+        model_size=vilbert_params.get("dinov2_model_size", "large"),
+        region_selection=vilbert_params.get("region_selection", "interpolate"),
+    )
+
+
+def create_dataloaders_dinov2_multilayer(train_data, val_data, test_data, parameters):
+    """Create dataloaders with DINOv2 Multi-Layer feature fusion."""
+    vilbert_params = parameters.get("vilbert_dinov2_multilayer", {})
+    return _create_dataloaders_with_extractor(
+        train_data,
+        val_data,
+        test_data,
+        parameters,
+        "training_dinov2_multilayer",
+        "vilbert_dinov2_multilayer",
+        "dinov2_multilayer",
+        model_size=vilbert_params.get("dinov2_model_size", "large"),
+        layer_indices=vilbert_params.get("dinov2_layer_indices", [6, 12, 18, 24]),
+        fusion_strategy=vilbert_params.get("dinov2_fusion_strategy", "concat"),
     )
 
 
@@ -613,7 +778,9 @@ def train_model(
         model.train()
         train_loss, num_batches = 0.0, 0
 
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{num_epochs}"):
+        for batch in tqdm(
+            train_loader, desc=f"Epoch {epoch}/{num_epochs}", disable=TQDM_DISABLE
+        ):
             batch = {k: v.to(device) for k, v in batch.items()}
             optimizer.zero_grad()
 
@@ -678,12 +845,56 @@ def train_model_vg(model, train_loader, val_loader, parameters):
     return train_model(model, train_loader, val_loader, parameters, "training_vg")
 
 
+def train_model_vg_rpn(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with VG RPN features."""
+    return train_model(model, train_loader, val_loader, parameters, "training_vg_rpn")
+
+
+def train_model_resnet_vg(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with simple VG ResNet-101 grid features."""
+    return train_model(
+        model, train_loader, val_loader, parameters, "training_resnet_vg"
+    )
+
+
+def train_model_resnet152_roi(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with ResNet-152 ROI pooling features."""
+    return train_model(
+        model, train_loader, val_loader, parameters, "training_resnet152_roi"
+    )
+
+
+def train_model_resnet152_grid(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with ResNet-152 grid features (no ROI pooling)."""
+    return train_model(
+        model, train_loader, val_loader, parameters, "training_resnet152_grid"
+    )
+
+
 def train_model_frcnn(model, train_loader, val_loader, parameters):
     return train_model(model, train_loader, val_loader, parameters, "training_frcnn")
 
 
+def train_model_frcnn_resnet152(model, train_loader, val_loader, parameters):
+    return train_model(
+        model, train_loader, val_loader, parameters, "training_frcnn_resnet152"
+    )
+
+
 def train_model_lmdb(model, train_loader, val_loader, parameters):
     return train_model(model, train_loader, val_loader, parameters, "training_lmdb")
+
+
+def train_model_dinov2(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with DINOv2 features."""
+    return train_model(model, train_loader, val_loader, parameters, "training_dinov2")
+
+
+def train_model_dinov2_multilayer(model, train_loader, val_loader, parameters):
+    """Train ViLBERT with DINOv2 multi-layer features."""
+    return train_model(
+        model, train_loader, val_loader, parameters, "training_dinov2_multilayer"
+    )
 
 
 def train_model_x152(model, train_loader, val_loader, parameters):
@@ -763,7 +974,7 @@ def run_inference(
     all_preds, all_probs, all_labels = [], [], []
 
     with torch.no_grad():
-        for batch in tqdm(test_loader, desc="Inference"):
+        for batch in tqdm(test_loader, desc="Inference", disable=TQDM_DISABLE):
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
 

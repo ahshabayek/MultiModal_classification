@@ -59,7 +59,16 @@ def download_lmdb_features(output_dir: str = "data/03_features/mmf") -> str:
 
 
 class LMDBFeaturesDataset(Dataset):
-    """Loads precomputed visual features from Facebook's detectron.lmdb."""
+    """Loads precomputed visual features from Facebook's detectron.lmdb.
+
+    Note: Facebook's LMDB contains exactly 100 regions per image (pre-extracted
+    with ResNeXt-152 on Visual Genome). The region count is fixed and cannot be
+    tuned - all images have shape (100, 2048) for features and (100, 5) for boxes.
+    """
+
+    # Fixed by Facebook's preprocessing - cannot be changed
+    FIXED_NUM_REGIONS = 100
+    FIXED_FEATURE_DIM = 2048
 
     def __init__(
         self,
@@ -67,14 +76,15 @@ class LMDBFeaturesDataset(Dataset):
         lmdb_path: str,
         tokenizer: BertTokenizer,
         max_seq_length: int = 128,
-        num_regions: int = 100,
-        visual_feature_dim: int = 2048,
+        num_regions: int = 100,  # Ignored - always 100 in LMDB
+        visual_feature_dim: int = 2048,  # Ignored - always 2048 in LMDB
     ):
         self.data = data.reset_index(drop=True)
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
-        self.num_regions = num_regions
-        self.visual_feature_dim = visual_feature_dim
+        # Use fixed values from LMDB, ignore parameters
+        self.num_regions = self.FIXED_NUM_REGIONS
+        self.visual_feature_dim = self.FIXED_FEATURE_DIM
         self.lmdb_path = lmdb_path
         self._env = None
 
@@ -131,53 +141,54 @@ class LMDBFeaturesDataset(Dataset):
         return None
 
     def _extract_features(self, data_dict) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract visual features and spatial locations from LMDB data."""
+        """Extract visual features and spatial locations from LMDB data.
+
+        LMDB always contains exactly 100 regions with 2048-dim features per image.
+        No padding or truncation is needed.
+        """
         if data_dict is None:
             return (
-                torch.zeros(self.num_regions, self.visual_feature_dim),
-                torch.zeros(self.num_regions, 5),
+                torch.zeros(self.FIXED_NUM_REGIONS, self.FIXED_FEATURE_DIM),
+                torch.zeros(self.FIXED_NUM_REGIONS, 5),
             )
 
-        # Extract features
+        # Extract features - try different key names used in LMDB
         if isinstance(data_dict, dict):
-            features = (
-                data_dict.get("features")
-                or data_dict.get("feature")
-                or data_dict.get("fc6")
-            )
-            boxes = data_dict.get("boxes") or data_dict.get("bbox")
+            features = data_dict.get("features")
+            if features is None:
+                features = data_dict.get("feature")
+            if features is None:
+                features = data_dict.get("fc6")
+
+            boxes = data_dict.get("boxes")
+            if boxes is None:
+                boxes = data_dict.get("bbox")
         else:
             features = data_dict
             boxes = None
 
-        # Process features
+        # Process features - always (100, 2048) from LMDB
         if features is not None:
-            features = np.array(features, dtype=np.float32)
-            features = self._pad_or_truncate(features, self.visual_feature_dim)
-            visual_feats = torch.tensor(features, dtype=torch.float32)
+            visual_feats = torch.tensor(np.array(features, dtype=np.float32))
         else:
-            visual_feats = torch.zeros(self.num_regions, self.visual_feature_dim)
+            visual_feats = torch.zeros(self.FIXED_NUM_REGIONS, self.FIXED_FEATURE_DIM)
 
         # Process spatial features
         spatial_feats = self._process_boxes(boxes)
 
         return visual_feats, spatial_feats
 
-    def _pad_or_truncate(self, arr: np.ndarray, feat_dim: int) -> np.ndarray:
-        """Pad or truncate array to num_regions."""
-        if len(arr) < self.num_regions:
-            pad = np.zeros((self.num_regions - len(arr), feat_dim), dtype=np.float32)
-            return np.vstack([arr, pad])
-        return arr[: self.num_regions]
-
     def _process_boxes(self, boxes) -> torch.Tensor:
-        """Convert bounding boxes to normalized spatial features [x1, y1, x2, y2, area]."""
+        """Convert bounding boxes to normalized spatial features [x1, y1, x2, y2, area].
+
+        LMDB always contains exactly 100 boxes per image.
+        """
         if boxes is None:
-            return torch.zeros(self.num_regions, 5)
+            return torch.zeros(self.FIXED_NUM_REGIONS, 5)
 
         boxes = np.array(boxes, dtype=np.float32)
         if len(boxes.shape) != 2 or boxes.shape[1] < 4:
-            return torch.zeros(self.num_regions, 5)
+            return torch.zeros(self.FIXED_NUM_REGIONS, 5)
 
         # Normalize by assumed 1000x1000 image size
         w = boxes[:, 2] - boxes[:, 0]
@@ -194,7 +205,6 @@ class LMDBFeaturesDataset(Dataset):
             ]
         )
 
-        spatial = self._pad_or_truncate(spatial, 5)
         return torch.tensor(spatial, dtype=torch.float32)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
@@ -243,12 +253,18 @@ def create_lmdb_dataloaders(
     lmdb_path: str = "data/03_features/mmf/detectron.lmdb",
     batch_size: int = 32,
     max_seq_length: int = 128,
-    num_regions: int = 100,
-    visual_feature_dim: int = 2048,
+    num_regions: int = 100,  # Ignored - LMDB has fixed 100 regions
+    visual_feature_dim: int = 2048,  # Ignored - LMDB has fixed 2048-dim features
     num_workers: int = 0,
     auto_download: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Create train/val/test DataLoaders for LMDB features."""
+    """Create train/val/test DataLoaders for LMDB features.
+
+    Note: num_regions and visual_feature_dim parameters are ignored because
+    Facebook's LMDB contains pre-extracted features with fixed dimensions:
+    - 100 regions per image
+    - 2048-dimensional features per region
+    """
     # Auto-download if LMDB doesn't exist
     if auto_download and not Path(lmdb_path).exists():
         lmdb_dir = str(Path(lmdb_path).parent)

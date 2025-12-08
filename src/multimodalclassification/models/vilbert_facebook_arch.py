@@ -583,6 +583,30 @@ class ViLBERTForClassification(nn.Module):
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         return total, trainable
 
+    def freeze_bert_layers(self, num_layers: int = 6) -> None:
+        """Freeze the first N BERT text encoder layers for efficient fine-tuning.
+
+        Args:
+            num_layers: Number of BERT layers to freeze (0-12). Default 6.
+        """
+        if num_layers <= 0:
+            return
+
+        # Freeze text embeddings (self.bert.embeddings from BertModel)
+        for param in self.bert.embeddings.parameters():
+            param.requires_grad = False
+
+        # Freeze first N text transformer layers (self.bert.encoder.layer)
+        for i, layer in enumerate(self.bert.encoder.layer):
+            if i < num_layers:
+                for param in layer.parameters():
+                    param.requires_grad = False
+
+        total, trainable = self.get_num_parameters()
+        logger.info(
+            f"Froze {num_layers} BERT layers. Trainable: {trainable:,} / {total:,}"
+        )
+
     def forward(
         self,
         input_ids,

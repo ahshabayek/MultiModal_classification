@@ -53,7 +53,6 @@ def get_x152pp_cfg(weights_path: str):
     cfg.MODEL.META_ARCHITECTURE = "GeneralizedRCNN"
     cfg.MODEL.BACKBONE.NAME = "build_resnet_backbone"
     cfg.MODEL.RESNETS.DEPTH = 152
-    cfg.MODEL.RESNETS.OUT_FEATURES = ["res5"]
     cfg.MODEL.RESNETS.NORM = "SyncBN"
     cfg.MODEL.RESNETS.STRIDE_IN_1X1 = False
     cfg.MODEL.RESNETS.NUM_GROUPS = 32
@@ -67,6 +66,8 @@ def get_x152pp_cfg(weights_path: str):
     # ROI Heads (Visual Genome 1600 classes)
     cfg.MODEL.ROI_HEADS.NAME = "Res5ROIHeads"
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1600
+    cfg.MODEL.ROI_HEADS.IN_FEATURES = ["res4"]
+    cfg.MODEL.RESNETS.OUT_FEATURES = ["res4", "res5"]
     cfg.MODEL.ROI_BOX_HEAD.NAME = "FastRCNNConvFCHead"
     cfg.MODEL.ROI_BOX_HEAD.NUM_FC = 2
     cfg.MODEL.ROI_BOX_HEAD.FC_DIM = 1024
@@ -76,7 +77,7 @@ def get_x152pp_cfg(weights_path: str):
     # RPN
     cfg.MODEL.PROPOSAL_GENERATOR.NAME = "RPN"
     cfg.MODEL.RPN.HEAD_NAME = "StandardRPNHead"
-    cfg.MODEL.RPN.IN_FEATURES = ["res5"]
+    cfg.MODEL.RPN.IN_FEATURES = ["res4"]
     cfg.MODEL.RPN.ANCHOR_SIZES = [[32, 64, 128, 256, 512]]
     cfg.MODEL.RPN.ASPECT_RATIOS = [[0.5, 1.0, 2.0]]
     cfg.MODEL.RPN.PRE_NMS_TOPK_TEST = 6000
@@ -137,7 +138,9 @@ class GridFeatsX152Extractor(BaseFeatureExtractor):
             param.requires_grad = False
 
         self.aug = T.ResizeShortestEdge(
-            [self.cfg.INPUT.MIN_SIZE_TEST], self.cfg.INPUT.MAX_SIZE_TEST
+            [self.cfg.INPUT.MIN_SIZE_TEST, self.cfg.INPUT.MIN_SIZE_TEST],
+            self.cfg.INPUT.MAX_SIZE_TEST,
+            sample_style="choice",
         )
 
         num_params = sum(p.numel() for p in self.model.parameters())
@@ -172,7 +175,7 @@ class GridFeatsX152Extractor(BaseFeatureExtractor):
         return self._select_regions(box_features, boxes, scores, height, width)
 
     def _extract_roi_features(self, features: dict, proposals: list) -> torch.Tensor:
-        feature_map = [features["res5"]]
+        feature_map = [features["res4"]]
         proposal_boxes = [p.proposal_boxes for p in proposals]
         box_features = self.model.roi_heads.box_pooler(feature_map, proposal_boxes)
         return self.model.roi_heads.box_head(box_features)
