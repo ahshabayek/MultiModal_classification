@@ -568,6 +568,7 @@ training_precomputed:
 # Expected AUROC: ~0.70 (matching Facebook's 0.7045 baseline)
 # Run with: kedro run --pipeline=vilbert_lmdb_train
 vilbert_lmdb:
+  # FOCAL LOSS EXPERIMENT
   # Path to Facebook's official pretrained weights
   facebook_weights_path: "weights/vilbert_pretrained_cc.bin"
   num_labels: 2

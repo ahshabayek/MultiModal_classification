@@ -1,4 +1,4 @@
-# MultiModalClassification
+# MultiModal Classification
 
 [![Powered by Kedro](https://img.shields.io/badge/powered_by-kedro-ffc900?logo=kedro)](https://kedro.org)
 
@@ -6,9 +6,295 @@
 
 A multimodal classification project using ViLBERT (Vision-and-Language BERT) for the Hateful Memes dataset. This project implements binary classification to detect hateful content in memes by combining image and text understanding.
 
+**Best Result:** 0.7580 AUROC (Facebook LMDB features), exceeding Facebook's baseline (0.7045) by +5.35%.
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Available Pipelines](#available-pipelines)
+- [Configuration](#configuration)
+- [MLflow Experiment Tracking](#mlflow-experiment-tracking)
+- [Results Summary](#results-summary)
+- [Adding New Models](#adding-new-models)
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.9+
+- CUDA-capable GPU (recommended, 8GB+ VRAM)
+- ~10GB disk space for data and weights
+
+### Step 1: Clone and Setup Environment
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd MultiModal_classification
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# or: .venv\Scripts\activate  # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install the project in editable mode
+pip install -e .
+```
+
+### Step 2: Install PyTorch with CUDA
+
+```bash
+# For CUDA 11.8
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# For CUDA 12.1
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# For CPU only
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+### Step 3: Install Additional Dependencies
+
+```bash
+# Core ML libraries
+pip install transformers datasets huggingface_hub
+pip install mlflow kedro-mlflow
+
+# For Faster R-CNN features
+pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu118/torch2.0/index.html
+
+# For DINOv2 features
+pip install timm
+
+# For LMDB features
+pip install lmdb
+```
+
+### Step 4: Download Pretrained Weights
+
+```bash
+# Create weights directory
+mkdir -p weights
+
+# Download Facebook's ViLBERT pretrained weights (Conceptual Captions)
+# Option 1: Using gdown
+pip install gdown
+gdown --id 1kuPr3OAN5oVJQYSXHhkv5tXgCn-mvJBj -O weights/vilbert_pretrained_cc.bin
+
+# Option 2: Manual download from:
+# https://dl.fbaipublicfiles.com/vilbert-multi-task/pretrained_model.bin
+```
+
+### Step 5: Download Facebook's LMDB Features (Recommended)
+
+For best results, use Facebook's precomputed features:
+
+```bash
+# Create features directory
+mkdir -p data/03_features/mmf
+
+# Download LMDB features (~3GB)
+# These are ResNeXt-152 features pretrained on Visual Genome
+gdown --id <facebook-lmdb-id> -O data/03_features/mmf/detectron.lmdb
+
+# Or follow instructions at:
+# https://github.com/facebookresearch/mmf/tree/main/tools/scripts/features
+```
+
+### Verify Installation
+
+```bash
+# Check Kedro installation
+kedro info
+
+# List available pipelines
+kedro registry list
+
+# Run a quick test (data processing only)
+kedro run --pipeline=data_processing
+```
+
+---
+
+## Quick Start
+
+### 1. Process Data (First Time Only)
+
+```bash
+kedro run --pipeline=data_processing
+```
+
+This downloads the Hateful Memes dataset from HuggingFace and images from Google Drive.
+
+### 2. Train Best Model (LMDB Features)
+
+```bash
+kedro run --pipeline=vilbert_lmdb_train
+```
+
+### 3. Train with On-the-fly Features (No LMDB Required)
+
+```bash
+# Best on-the-fly model (ROI pooling)
+kedro run --pipeline=vilbert_resnet152_roi_train
+
+# Or with DINOv2
+kedro run --pipeline=vilbert_dinov2_train
+```
+
+### 4. View Results
+
+```bash
+mlflow ui --backend-store-uri mlruns
+# Open http://localhost:5000
+```
+
+---
+
+## Available Pipelines
+
+### Data Processing
+
+| Pipeline | Command | Description |
+|----------|---------|-------------|
+| Data Processing | `kedro run --pipeline=data_processing` | Load data from HuggingFace, download images |
+
+### Training Pipelines (Full: Data + Training)
+
+| Pipeline | Command | Feature Extractor | Expected AUROC |
+|----------|---------|-------------------|----------------|
+| **LMDB (Best)** | `kedro run --pipeline=vilbert_lmdb_train` | Facebook LMDB (ResNeXt-152 VG) | **0.7580** |
+| **ROI Pool (Best On-the-fly)** | `kedro run --pipeline=vilbert_resnet152_roi_train` | ResNet-152 + ROI Pooling | **0.7197** |
+| DINOv2 Multi-Layer | `kedro run --pipeline=vilbert_dinov2_multilayer_train` | DINOv2 ViT-L (4 layers) | 0.7171 |
+| DINOv2 | `kedro run --pipeline=vilbert_dinov2_train` | DINOv2 ViT-L (single layer) | 0.7069 |
+| ResNet-152 Grid | `kedro run --pipeline=vilbert_resnet152_grid_train` | ResNet-152 Grid Pooling | 0.6658 |
+| Faster R-CNN R50 | `kedro run --pipeline=vilbert_frcnn_train` | Faster R-CNN ResNet-50 (COCO) | 0.6472 |
+| Faster R-CNN R152 | `kedro run --pipeline=vilbert_frcnn_resnet152_train` | Faster R-CNN ResNet-152 (COCO) | 0.6334 |
+| X-152++ | `kedro run --pipeline=vilbert_x152_train` | Facebook X-152++ (VQA winner) | TBD |
+
+### Model-Only Pipelines (Skip Data Processing)
+
+Use these if data is already processed:
+
+```bash
+kedro run --pipeline=model_training_lmdb
+kedro run --pipeline=model_training_resnet152_roi
+kedro run --pipeline=model_training_dinov2
+kedro run --pipeline=model_training_dinov2_multilayer
+kedro run --pipeline=model_training_resnet152_grid
+kedro run --pipeline=model_training_frcnn
+kedro run --pipeline=model_training_frcnn_resnet152
+```
+
+### Inference & Validation
+
+| Pipeline | Command | Description |
+|----------|---------|-------------|
+| Validate | `kedro run --pipeline=vilbert_validate` | Evaluate trained model on test set |
+| Inference (Pretrained) | `kedro run --pipeline=vilbert_inference` | Run inference with HuggingFace weights |
+| Inference (Local) | `kedro run --pipeline=vilbert_inference_local` | Run inference with locally trained weights |
+
+---
+
+## Configuration
+
+All configuration is in `conf/base/parameters.yml`.
+
+### Key Training Parameters
+
+```yaml
+training:
+  batch_size: 16          # 16 for LMDB, 32 for others
+  num_epochs: 20          # With early stopping
+  learning_rate: 1.0e-5   # Conservative for fine-tuning
+  weight_decay: 0.01      # AdamW regularization
+  warmup_steps: 2000      # Linear warmup
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  loss_type: "ce"         # Options: ce, focal, label_smoothing
+```
+
+### Feature Extractor Selection
+
+```yaml
+vilbert:
+  feature_extractor: "resnet"  # Options: resnet, fasterrcnn, dinov2, etc.
+  max_regions: 36              # 36 for most, 100 for LMDB
+  freeze_bert_layers: 0        # 0 = train all layers
+```
+
+### Model-Specific Configs
+
+Each feature extractor has its own configuration section:
+- `vilbert_lmdb` - Facebook LMDB features
+- `vilbert_resnet152_roi` - ROI pooling
+- `vilbert_dinov2` - DINOv2 features
+- `vilbert_dinov2_multilayer` - Multi-layer DINOv2
+- `vilbert_frcnn` - Faster R-CNN ResNet-50
+- `vilbert_frcnn_resnet152` - Faster R-CNN ResNet-152
+
+---
+
+## MLflow Experiment Tracking
+
+### Starting MLflow UI
+
+```bash
+source .venv/bin/activate
+mlflow ui --backend-store-uri mlruns
+# Open http://localhost:5000
+```
+
+### Logged Metrics
+
+**Training:**
+- `train_loss`, `val_loss` - Loss per epoch
+- `val_auroc`, `val_accuracy`, `val_f1` - Validation metrics
+- Best model checkpoint
+
+**Evaluation:**
+- `test_auroc`, `test_accuracy`, `test_precision`, `test_recall`, `test_f1`
+- Confusion matrix (TP, TN, FP, FN)
+
+---
+
+## Results Summary
+
+| Feature Extractor | AUROC | Accuracy | Notes |
+|-------------------|-------|----------|-------|
+| Facebook LMDB (ResNeXt-152 VG) | **0.7580** | 71.9% | Best overall, requires LMDB download |
+| ResNet-152 ROI Pool (ImageNet) | **0.7197** | 68.9% | Best on-the-fly extraction |
+| DINOv2 Multi-Layer (ViT-L) | 0.7171 | 68.1% | Uses label smoothing (0.1) |
+| DINOv2 Single-Layer (ViT-L) | 0.7069 | 67.1% | Self-supervised features |
+| Facebook Baseline | 0.7045 | ~65% | Reference from paper |
+| ResNet-152 Grid (no ROI) | 0.6658 | 65.6% | Simple grid pooling |
+| Faster R-CNN R50 (COCO) | 0.6472 | 63.5% | COCO pretrained |
+| Faster R-CNN R152 (COCO) | 0.6334 | 63.5% | COCO pretrained |
+
+### Key Findings
+
+1. **Precomputed features dominate:** LMDB achieves best results due to Visual Genome pretraining alignment with ViLBERT.
+
+2. **ROI pooling helps significantly:** ROI approach (0.7197) outperforms grid pooling (0.6658) by +5.4%.
+
+3. **DINOv2 beats COCO detectors:** Self-supervised DINOv2 (0.7069) outperforms COCO Faster R-CNN (0.6334) by +7.4%.
+
+4. **BERT freezing hurts on-the-fly extractors:** Freezing first 6 BERT layers has negligible effect on LMDB (-0.03%) but hurts ROI (-1.77%) and DINOv2 (-2.66%).
+
+5. **Focal loss doesn't help:** Despite class imbalance (53.6%/46.4%), focal loss hurt all models by 0.35-1.07%.
+
+---
+
 ## Data Loading
 
-The project automatically loads data from HuggingFace (`neuralcatcher/hateful_memes`) and downloads images from Google Drive. This mirrors the approach in `notebooks/hateful-memes.ipynb`.
+The project automatically loads data from HuggingFace (`neuralcatcher/hateful_memes`) and downloads images from Google Drive.
 
 **Data flow:**
 1. Load dataset from HuggingFace (train/validation/test splits)
@@ -17,137 +303,9 @@ The project automatically loads data from HuggingFace (`neuralcatcher/hateful_me
 4. Fetch any missing images from HuggingFace backup
 5. Preprocess text and validate image paths
 
-## Available Pipelines
-
-The project provides multiple pipeline modes for different use cases:
-
-| Pipeline | Command | Description |
-|----------|---------|-------------|
-| Data Processing | `kedro run --pipeline=data_processing` | Load data from HuggingFace and preprocess |
-| Training (HF) | `kedro run --pipeline=vilbert_train` | Full pipeline with HuggingFace weights + ResNet features |
-| Training (FRCNN) | `kedro run --pipeline=vilbert_frcnn_train` | Facebook weights + Faster R-CNN (COCO) features |
-| Training (VG) | `kedro run --pipeline=vilbert_vg_train` | Facebook weights + Faster R-CNN (Visual Genome) features |
-| Validation | `kedro run --pipeline=vilbert_validate` | Validate a locally trained model on the test set |
-| Inference (Pretrained) | `kedro run --pipeline=vilbert_inference` | Run inference using pretrained HuggingFace weights |
-| Inference (Local) | `kedro run --pipeline=vilbert_inference_local` | Run inference using locally trained weights |
-
-**Model-only pipelines** (use if data is already processed):
-- `kedro run --pipeline=model_training`
-- `kedro run --pipeline=model_validation`
-- `kedro run --pipeline=model_inference`
-- `kedro run --pipeline=model_inference_local`
-
-## MLflow Experiment Tracking
-
-This project uses MLflow for experiment tracking via the `kedro-mlflow` plugin.
-
-### What Gets Logged
-
-**During Training:**
-- Model parameters (total params, trainable params, device)
-- Training configuration (learning rate, batch size, epochs, etc.)
-- Per-epoch metrics: train_loss, val_loss, val_auroc, val_accuracy, val_f1
-- Best model checkpoint
-
-**During Inference/Evaluation:**
-- Inference metrics: AUROC, accuracy, precision, recall, F1
-- Confusion matrix values (TP, TN, FP, FN)
-- Prediction validation checks
-
-### Viewing MLflow UI
-
-To view experiment results in the MLflow dashboard:
-
-```bash
-# Activate your virtual environment first
-source .venv/bin/activate
-
-# Start MLflow UI
-mlflow ui --backend-store-uri mlruns
-```
-
-Then open http://localhost:5000 in your browser.
-
-## Prediction Validation Checks
-
-The inference pipelines include automatic validation checks on predictions:
-
-| Check | Description |
-|-------|-------------|
-| `no_null_predictions` | Ensures no null values in predictions |
-| `valid_binary_predictions` | Verifies predictions are 0 or 1 |
-| `valid_probability_range` | Confirms probabilities are in [0, 1] |
-| `no_null_probabilities` | Ensures no null probability values |
-| `prediction_count` | Verifies predictions were generated |
-| `class_distribution` | Checks for reasonable class balance |
-| `better_than_random` | Validates AUROC > 0.5 (better than random) |
-
-## Performance Improvement Techniques
-
-The project implements several techniques proven to improve ViLBERT performance on Hateful Memes:
-
-### 1. Caption Enrichment (CES) - +2-6% AUROC
-
-Adds image captions to the text input using BLIP model. This helps the model understand visual content better.
-
-```yaml
-# In conf/base/parameters.yml
-data_processing:
-  use_captions: true  # Enable caption enrichment
-```
-
-Reference: [Caption Enriched Samples for Improving Hateful Memes Detection](https://aclanthology.org/2021.emnlp-main.738/) (EMNLP 2021)
-
-### 2. Focal Loss - +1-2% AUROC
-
-Handles class imbalance by down-weighting easy examples and focusing on hard negatives.
-
-```yaml
-# In conf/base/parameters.yml
-training:
-  loss_type: "focal"  # Options: ce, focal, label_smoothing, focal_smoothing
-  focal_alpha: 0.35   # Weight for minority class
-  focal_gamma: 2.0    # Focusing parameter
-```
-
-### 3. Proper Visual Feature Extraction
-
-Uses pretrained ResNet-152 or CLIP for visual features instead of raw pixels.
-
-```yaml
-# In conf/base/parameters.yml
-vilbert:
-  feature_extractor: "resnet"  # or "clip" for better results
-```
-
-### 4. Training Hyperparameters (Facebook MMF Baseline)
-
-Matches the official Facebook MMF configuration:
-
-| Parameter | Value |
-|-----------|-------|
-| Learning rate | 5e-5 |
-| Batch size | 32 |
-| Warmup steps | 2000 |
-| Optimizer | AdamW |
-| Gradient clipping | 1.0 |
-
-### Expected Performance
-
-| Configuration | Expected AUROC |
-|--------------|----------------|
-| Baseline (pixel features) | ~0.62 |
-| + ResNet features | ~0.65-0.68 |
-| + Focal loss | ~0.66-0.69 |
-| + Caption enrichment | ~0.68-0.72 |
-| + CLIP features | ~0.70-0.72 |
-| Facebook ViLBERT baseline | 0.7045 |
-
 ---
 
 ## Adding New Models
-
-This project uses a modular architecture that makes it easy to add new models and feature extractors. All models are registered using decorators and follow a consistent interface.
 
 ### Project Structure
 
@@ -161,309 +319,100 @@ src/multimodalclassification/
 │   └── feature_extractors/
 │       ├── __init__.py          # Feature extractor exports
 │       ├── resnet.py            # ResNet-152 grid features
-│       ├── clip.py              # CLIP semantic features
-│       └── fasterrcnn.py        # Faster R-CNN object features
+│       ├── dinov2.py            # DINOv2 ViT features
+│       ├── fasterrcnn.py        # Faster R-CNN features
+│       └── resnet152_roi.py     # ROI pooling features
 └── pipelines/
     └── model_training/
         ├── nodes.py             # Training logic
         └── pipeline.py          # Pipeline definitions
 ```
 
-### Adding a New Multimodal Model
-
-1. **Create a new file** in `src/multimodalclassification/models/` (e.g., `my_model.py`)
-
-2. **Inherit from `BaseMultimodalModel`** and implement required methods:
-
-```python
-# src/multimodalclassification/models/my_model.py
-import torch
-import torch.nn as nn
-from .base import BaseMultimodalModel, register_model
-
-
-@register_model("my_model")  # Register with a unique name
-class MyMultimodalModel(BaseMultimodalModel):
-    """
-    My custom multimodal model.
-    
-    Combines visual and text features for classification.
-    """
-    
-    def __init__(self, num_labels: int = 2, **kwargs):
-        super().__init__()
-        self.num_labels = num_labels
-        # Initialize your model components here
-        self.text_encoder = ...
-        self.vision_encoder = ...
-        self.classifier = nn.Linear(hidden_size, num_labels)
-    
-    def forward(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        visual_features: torch.Tensor,
-        visual_attention_mask: torch.Tensor = None,
-        spatial_locations: torch.Tensor = None,
-        labels: torch.Tensor = None,
-        **kwargs,
-    ) -> dict:
-        """
-        Forward pass.
-        
-        Args:
-            input_ids: Token IDs [batch, seq_len]
-            attention_mask: Text attention mask [batch, seq_len]
-            visual_features: Visual features [batch, num_regions, feature_dim]
-            visual_attention_mask: Visual attention mask [batch, num_regions]
-            spatial_locations: Bounding box coordinates [batch, num_regions, 5]
-            labels: Ground truth labels [batch]
-        
-        Returns:
-            dict with 'logits' and optionally 'loss'
-        """
-        # Your forward logic here
-        logits = self.classifier(combined_features)
-        
-        loss = None
-        if labels is not None:
-            loss_fn = nn.CrossEntropyLoss()
-            loss = loss_fn(logits, labels)
-        
-        return {"logits": logits, "loss": loss}
-    
-    @classmethod
-    def from_pretrained(cls, model_path: str, num_labels: int = 2, **kwargs):
-        """Load pretrained weights."""
-        model = cls(num_labels=num_labels, **kwargs)
-        state_dict = torch.load(model_path, map_location="cpu")
-        model.load_state_dict(state_dict, strict=False)
-        return model
-    
-    def get_num_parameters(self) -> tuple:
-        """Return (total_params, trainable_params)."""
-        total = sum(p.numel() for p in self.parameters())
-        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        return total, trainable
-```
-
-3. **Export in `__init__.py`**:
-
-```python
-# In src/multimodalclassification/models/__init__.py
-from .my_model import MyMultimodalModel
-```
-
-4. **Create a pipeline** (optional - for separate training):
-
-```python
-# In src/multimodalclassification/pipelines/model_training/pipeline.py
-def create_my_model_pipeline(**kwargs) -> Pipeline:
-    return pipeline([
-        node(func=create_dataloaders, ...),
-        node(func=load_my_model, ...),
-        node(func=train_model, ...),
-        node(func=evaluate_model, ...),
-    ])
-```
-
-5. **Add configuration** in `conf/base/parameters.yml`:
-
-```yaml
-my_model:
-  num_labels: 2
-  pretrained_path: "weights/my_model.bin"
-  feature_extractor: "resnet"  # or clip, fasterrcnn
-```
-
 ### Adding a New Feature Extractor
 
-1. **Create a new file** in `src/multimodalclassification/models/feature_extractors/`
+1. Create a new file in `src/multimodalclassification/models/feature_extractors/`
 
-2. **Inherit from `BaseFeatureExtractor`**:
+2. Inherit from `BaseFeatureExtractor`:
 
 ```python
-# src/multimodalclassification/models/feature_extractors/my_extractor.py
-import torch
-from PIL import Image
 from ..base import BaseFeatureExtractor, register_feature_extractor
-
 
 @register_feature_extractor("my_extractor")
 class MyFeatureExtractor(BaseFeatureExtractor):
-    """
-    My custom visual feature extractor.
-    """
-    
-    def __init__(
-        self,
-        output_dim: int = 2048,
-        num_regions: int = 36,
-        device: str = "cuda",
-        **kwargs,
-    ):
+    def __init__(self, output_dim=2048, num_regions=36, device="cuda", **kwargs):
         super().__init__(output_dim, num_regions, device)
-        # Initialize your backbone
-        self.backbone = ...
-        self.backbone.eval()
+        self.backbone = ...  # Your model
     
-    def extract_features(self, image: Image.Image) -> tuple:
-        """
-        Extract visual features from an image.
-        
-        Args:
-            image: PIL Image
-        
-        Returns:
-            tuple of (features, spatial_locations)
-            - features: [num_regions, output_dim]
-            - spatial_locations: [num_regions, 5] (x1, y1, x2, y2, area)
-        """
-        with torch.no_grad():
-            # Your extraction logic
-            features = self.backbone(preprocessed_image)
-            spatial = self._compute_spatial_locations(...)
-        
-        return features, spatial
+    def extract_features(self, image):
+        # Returns (features, spatial_locations)
+        # features: [num_regions, output_dim]
+        # spatial: [num_regions, 5] (x1, y1, x2, y2, area)
+        ...
 ```
 
-3. **Export in feature_extractors/__init__.py**:
+3. Export in `feature_extractors/__init__.py`
 
-```python
-from .my_extractor import MyFeatureExtractor
-```
+4. Add configuration in `conf/base/parameters.yml`
 
-### Using Registry Functions
-
-The registry system allows dynamic model/extractor loading:
-
-```python
-from multimodalclassification.models import get_model, get_feature_extractor
-
-# Load a model by name
-model = get_model("vilbert_hf", num_labels=2)
-
-# Load a feature extractor by name  
-extractor = get_feature_extractor("resnet", output_dim=2048, num_regions=36)
-
-# List available models/extractors
-from multimodalclassification.models import list_available_models, list_available_extractors
-list_available_models()
-list_available_extractors()
-```
-
-### Available Models
-
-| Model Name | Description | Feature Extractor |
-|------------|-------------|-------------------|
-| `vilbert_hf` | ViLBERT with HuggingFace community weights | Any |
-| `vilbert_facebook` | ViLBERT with Facebook's official CC weights | fasterrcnn (recommended) |
+5. Create pipeline in `pipeline_registry.py`
 
 ### Available Feature Extractors
 
 | Extractor | Description | Output Dim | Regions |
 |-----------|-------------|------------|---------|
-| `resnet` | ResNet-152 grid features | 2048 | 36 (6x6) |
-| `clip` | CLIP ViT-B/32 semantic features | 512 | 49 (7x7) |
-| `fasterrcnn` | Faster R-CNN object detection (COCO, 91 classes) | 2048 | 36 |
-| `fasterrcnn_vg` | Faster R-CNN object detection (Visual Genome, 1600 classes) | 2048 | 36 |
-
-**Note:** The `fasterrcnn_vg` extractor requires downloading pretrained weights from:
-https://drive.google.com/file/d/18n_3V1rywgeADZ3oONO0DsuuS9eMW6sN/view
-
-Save to `weights/faster_rcnn_res101_vg.pth`
+| `resnet` | ResNet-152 grid features | 2048 | 36 |
+| `resnet152_roi` | ResNet-152 with ROI pooling | 2048 | 36 |
+| `dinov2` | DINOv2 ViT-L features | 1024→2048 | 36 |
+| `dinov2_multilayer` | DINOv2 multi-layer fusion | 4096→2048 | 36 |
+| `fasterrcnn` | Faster R-CNN R50 (COCO) | 2048 | 36 |
+| `fasterrcnn_resnet152` | Faster R-CNN R152 (COCO) | 2048 | 36 |
+| `lmdb` | Facebook precomputed features | 2048 | 100 |
 
 ---
 
-Take a look at the [Kedro documentation](https://docs.kedro.org) to get started.
+## Troubleshooting
 
-## Rules and guidelines
+### CUDA Out of Memory
 
-In order to get the best out of the template:
-
-* Don't remove any lines from the `.gitignore` file we provide
-* Make sure your results can be reproduced by following a [data engineering convention](https://docs.kedro.org/en/stable/faq/faq.html#what-is-data-engineering-convention)
-* Don't commit data to your repository
-* Don't commit any credentials or your local configuration to your repository. Keep all your credentials and local configuration in `conf/local/`
-
-## How to install dependencies
-
-Declare any dependencies in `requirements.txt` for `pip` installation.
-
-To install them, run:
-
-```
-pip install -r requirements.txt
+Reduce batch size in `conf/base/parameters.yml`:
+```yaml
+training:
+  batch_size: 8  # or 4
 ```
 
-## How to run your Kedro pipeline
+### Missing LMDB Features
 
-You can run your Kedro project with:
-
-```
-kedro run
-```
-
-## How to test your Kedro project
-
-Have a look at the files `tests/test_run.py` and `tests/pipelines/data_science/test_pipeline.py` for instructions on how to write your tests. Run the tests as follows:
-
-```
-pytest
+If you don't have Facebook's LMDB features, use on-the-fly extraction:
+```bash
+kedro run --pipeline=vilbert_resnet152_roi_train
 ```
 
-You can configure the coverage threshold in your project's `pyproject.toml` file under the `[tool.coverage.report]` section.
+### Slow Training
 
-## Project dependencies
-
-To see and update the dependency requirements for your project use `requirements.txt`. You can install the project requirements with `pip install -r requirements.txt`.
-
-[Further information about project dependencies](https://docs.kedro.org/en/stable/kedro_project_setup/dependencies.html#project-specific-dependencies)
-
-## How to work with Kedro and notebooks
-
-> Note: Using `kedro jupyter` or `kedro ipython` to run your notebook provides these variables in scope: `catalog`, `context`, `pipelines` and `session`.
->
-> Jupyter, JupyterLab, and IPython are already included in the project requirements by default, so once you have run `pip install -r requirements.txt` you will not need to take any extra steps before you use them.
-
-### Jupyter
-To use Jupyter notebooks in your Kedro project, you need to install Jupyter:
-
-```
-pip install jupyter
+DINOv2 extraction adds ~0.5s/image. Use precomputed features for faster training:
+```bash
+kedro run --pipeline=vilbert_lmdb_train
 ```
 
-After installing Jupyter, you can start a local notebook server:
+### Import Errors
 
-```
-kedro jupyter notebook
-```
-
-### JupyterLab
-To use JupyterLab, you need to install it:
-
-```
-pip install jupyterlab
+Ensure all dependencies are installed:
+```bash
+pip install -e .
+pip install transformers datasets timm detectron2
 ```
 
-You can also start JupyterLab:
+---
 
-```
-kedro jupyter lab
-```
+## References
 
-### IPython
-And if you want to run an IPython session:
+- [ViLBERT Paper](https://arxiv.org/abs/1908.02265) (Lu et al., NeurIPS 2019)
+- [Hateful Memes Challenge](https://arxiv.org/abs/2005.04790) (Kiela et al., NeurIPS 2020)
+- [Facebook MMF](https://github.com/facebookresearch/mmf)
+- [DINOv2](https://arxiv.org/abs/2304.07193) (Oquab et al., 2023)
 
-```
-kedro ipython
-```
+---
 
-### How to ignore notebook output cells in `git`
-To automatically strip out all output cell contents before committing to `git`, you can use tools like [`nbstripout`](https://github.com/kynan/nbstripout). For example, you can add a hook in `.git/config` with `nbstripout --install`. This will run `nbstripout` before anything is committed to `git`.
+## License
 
-> *Note:* Your output cells will be retained locally.
-
-## Package your Kedro project
-
-[Further information about building project documentation and packaging your project](https://docs.kedro.org/en/stable/tutorial/package_a_project.html)
+This project is for educational and research purposes.

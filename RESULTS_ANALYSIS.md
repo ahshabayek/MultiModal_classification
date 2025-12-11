@@ -1738,3 +1738,43 @@ We tested the effect of freezing the first 6 (of 12) BERT text encoder layers du
 ---
 
 *Last updated: December 9, 2024*
+
+---
+
+## Appendix G: Focal Loss Experiments
+
+### Motivation
+
+Focal loss was designed to address class imbalance by down-weighting easy examples and focusing training on hard negatives. Given the Hateful Memes dataset characteristics:
+- Class imbalance: 53.6% hateful in training, 41.3% in test
+- Hard examples: Subtle cues, sarcasm, cultural references
+- Benign confounders: Similar images/text with opposite labels
+
+We hypothesized that focal loss (α=0.35, γ=2.0) would improve performance over standard cross-entropy.
+
+### Results
+
+| Model | CE Baseline | Focal Loss | Change | Impact |
+|-------|-------------|------------|--------|--------|
+| **LMDB** | 0.7580 | 0.7547 | **-0.43%** | Hurt |
+| **ROI** | 0.7197 | 0.7120 | **-1.07%** | Hurt |
+| **DINOv2** | 0.7069 | 0.7044 | **-0.35%** | Hurt |
+| **DINOv2-ML** | 0.7171 | 0.7142 | **-0.40%** | Hurt |
+
+### Analysis
+
+**Surprising Finding**: Contrary to theoretical expectations, focal loss hurt performance across all models.
+
+**Explanations**:
+
+1. **Mild class imbalance**: The 53.6%/46.4% split is relatively balanced. Focal loss is most effective with severe imbalance (e.g., 1:100 ratios in object detection).
+
+2. **Loss of training signal**: Focal loss down-weights "easy" examples, but correctly classified examples in this dataset still contain valuable training signal for learning subtle multimodal interactions.
+
+3. **Well-calibrated pretrained weights**: The Facebook ViLBERT weights are already well-calibrated from Conceptual Captions pretraining. Focal loss's confidence adjustments may be counterproductive.
+
+4. **Sufficient regularization**: Standard cross-entropy combined with existing regularization (weight decay=0.01, dropout=0.1, early stopping) appears sufficient for this task.
+
+### Recommendation
+
+**Use standard cross-entropy loss** for ViLBERT on Hateful Memes. The existing regularization techniques are more effective than focal loss for this moderately imbalanced multimodal classification task.
