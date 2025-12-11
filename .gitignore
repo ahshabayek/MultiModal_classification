@@ -68,3 +68,9 @@ Thumbs.db
 # Credentials and local config
 conf/local/credentials.yml
 conf/local/mlflow.yml
+
+# Model weights - too large for git
+weights/
+*.pth
+*.bin
+*.pkl
